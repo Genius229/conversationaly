@@ -119,10 +119,13 @@ See `docs/gigastt/implementation-status.md` for current verification boundaries.
 
 ## Verification matrix
 
-Latest automated evidence: Windows desktop/installer run `34463264744` PASS;
-contract run `34468472154` PASS (Ubuntu 98 tests, Windows 92 tests plus 20 stress
-repetitions, Clippy on both); frontend 9 tests, TypeScript and 12-page Next build
-PASS. Physical acceptance and graceful Windows shutdown remain open.
+Latest automated evidence, including approved catalog/import/optional-onboarding
+follow-ups: Windows desktop/installer run `34490125378` PASS; contract run
+`34490124748` PASS (Ubuntu 112 tests, Windows 106 tests plus 20 stress
+repetitions, Clippy on both); frontend 26 focused tests, TypeScript and 12-page
+Next build PASS, plus built-page browser checks with mocked IPC. Physical
+acceptance and graceful Windows shutdown remain open. Follow-up boundaries are
+documented in `docs/gigastt/import-onboarding-verification.md`.
 
 - Rust unit/contract/integration tests for every post-transcription module.
 - Frontend typecheck/lint/tests for progress and settings state.

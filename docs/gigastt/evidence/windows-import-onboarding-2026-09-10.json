@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "verifiedDateUtc": "2026-09-10",
+  "repository": "Genius229/conversationaly",
+  "commit": "b094433df71cca2480e78a634bc0af32f66c5b3d",
+  "desktopRunId": 34490125378,
+  "desktopRunUrl": "https://github.com/Genius229/conversationaly/actions/runs/34490125378",
+  "desktopConclusion": "success",
+  "contractRunId": 34490124748,
+  "contractRunUrl": "https://github.com/Genius229/conversationaly/actions/runs/34490124748",
+  "contractConclusion": "success",
+  "tests": {
+    "ubuntu": 112,
+    "windows": 106,
+    "windowsConsecutiveReadinessStress": 20,
+    "focusedFrontend": 26,
+    "clippyBothPlatforms": "passed"
+  },
+  "target": "x86_64-pc-windows-msvc",
+  "profile": "release-cpu-unsigned-development",
+  "productName": "Conversationaly GigaSTT Dev",
+  "identifier": "com.conversationaly.gigastt-dev",
+  "gigasttVersion": "2.18.0",
+  "gigasttSourceCommit": "b4f7531b5e54af69e4766bb36c14cc6745e452b2",
+  "runtimeArtifactId": 10157644437,
+  "smokeEvidenceArtifactId": 10157641994,
+  "installer": {
+    "artifactId": 10158154233,
+    "artifactName": "conversationaly-gigastt-windows-unsigned-dev",
+    "filename": "Conversationaly GigaSTT Dev_1.4.1_x64-setup.exe",
+    "sizeBytes": 62216987,
+    "sha256": "033f1c9740e0172dc4d8bcdfa7113db911cc2147c845086ce10de46caeecc6f1"
+  },
+  "checks": {
+    "pinnedNativeSmoke": "passed",
+    "fullTauriBuild": "passed",
+    "installerRuntimeHashes": "passed",
+    "downloadedInstallerHash": "passed",
+    "importAndFirstRunBrowserMockIpc": "passed",
+    "catalogBrowserRegression": "passed",
+    "independentScopedReviews": "approved"
+  },
+  "notVerified": [
+    "physical Windows acceptance of the new import dialog and first-run wizard",
+    "USB microphone persistence and 60-minute recording acceptance",
+    "graceful Windows GigaSTT sidecar shutdown"
+  ]
+}

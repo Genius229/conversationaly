@@ -2,6 +2,14 @@
 
 Approved follow-up, 2026-09-10. Baseline: `b363b09`.
 
+Verified source: `b094433`. Windows app/installer CI
+[34490125378](https://github.com/Genius229/conversationaly/actions/runs/34490125378)
+**PASS**; contract matrix
+[34490124748](https://github.com/Genius229/conversationaly/actions/runs/34490124748)
+**PASS** (Ubuntu 112, Windows 106, plus 20 Windows stress repetitions).
+Installer artifact: `10158154233`; downloaded hash and metadata in
+`evidence/windows-import-onboarding-2026-09-10.json`.
+
 ## Import audio
 
 The file picker and drag-and-drop import now use
@@ -76,7 +84,7 @@ the epoch fix. The commit-drop test has an explicit pre-commit barrier.
 These browser tests use the actual built UI with deterministic Tauri IPC,
 **not real audio inference**. The Rust tests exercise the production staging,
 registry, SQLite and service modules. Full native Windows compilation and
-installer checks remain a separate CI gate; physical MP4 import acceptance,
+installer checks passed their separate CI gate; physical MP4 import acceptance,
 USB/60-minute recording and graceful Windows sidecar shutdown remain separate.
 
 ```sh

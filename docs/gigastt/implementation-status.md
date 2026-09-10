@@ -15,10 +15,13 @@ https://github.com/Genius229/conversationaly/actions/runs/34477334327
 (`188d1c8`), installer artifact `10152866908`. Metadata-only evidence:
 `evidence/windows-catalog-2026-09-10.json`. See `catalog-ui-verification.md`.
 
-Next approved follow-up is implemented and locally verified: **Import audio →
+Latest approved follow-up is implemented and verified: **Import audio →
 GigaSTT** plus optional first-run model setup with no automatic downloads.
 Native ownership/transaction reviews and built-page browser checks passed;
-new Windows CI is pending. See `import-onboarding-verification.md`.
+Windows app/installer run **34490125378 PASS** (`b094433`), contract matrix
+**34490124748 PASS** (Ubuntu 112, Windows 106, plus 20 Windows stress repetitions).
+Installer artifact: **10158154233**. See `import-onboarding-verification.md` and
+`evidence/windows-import-onboarding-2026-09-10.json`.
 
 ## Implemented and locally exercised
 
@@ -140,11 +143,12 @@ or audio) is in `evidence/windows-2026-09-10.json`. This remains a sidecar
 spike, not full installer/graceful-shutdown acceptance.
 
 Contract CI **PASS** on both Windows and Ubuntu:
-https://github.com/Genius229/conversationaly/actions/runs/34468472154
-(`b9f26c7`). Ubuntu: **98 passed**, Windows: **92 passed**, plus **20 consecutive
+https://github.com/Genius229/conversationaly/actions/runs/34490124748
+(`b094433`). Ubuntu: **112 passed**, Windows: **106 passed**, plus **20 consecutive
 Windows readiness-timeout stress passes**; Clippy passed on both platforms.
 Platform counts differ because six tests are Unix-only.
-Evidence: `evidence/contracts-2026-09-10.json`.
+Evidence: `evidence/windows-import-onboarding-2026-09-10.json`; original
+integration evidence is retained in `evidence/contracts-2026-09-10.json`.
 
 Earlier CI history: `ce82663` fixed the Windows canonical/short-path assertion
 exposed by run `34432100449`. Integration run `34463264459` (`119b77e`)
@@ -181,9 +185,8 @@ both scripts locally without AST errors.
 
 Audio-format boundary: supported MP4 audio decodes/resamples into a temporary
 PCM16 mono 16 kHz WAV before GigaSTT processing; original audio is preserved.
-Direct imported-file → GigaSTT is now implemented in the follow-up, but the
-previously published `188d1c8` installer still uses the old Import audio path.
-Use the new installer only after its separate Windows gate is recorded.
+Direct imported-file → GigaSTT is available in the verified `b094433` installer.
+The older `188d1c8` catalog-only installer still uses the old Import audio path.
 
 1. Close the graceful Windows shutdown release limitation with a
    supported/proven mechanism (native build/inference smoke already passes).

@@ -11,12 +11,12 @@ Use the `conversationaly-gigastt-windows-unsigned-dev` artifact from a successfu
 Record the run URL and commit SHA. Do not use an artifact from a failed or
 cancelled run. The build is CPU-only, with GigaSTT pinned to 2.18.0.
 
-Latest verified build (includes the Settings catalog):
-[run 34477334327](https://github.com/Genius229/conversationaly/actions/runs/34477334327),
-commit `188d1c8`. [Download artifact 10152866908](https://github.com/Genius229/conversationaly/actions/runs/34477334327/artifacts/10152866908)
+Latest verified build (catalog, direct GigaSTT import and optional first-run setup):
+[run 34490125378](https://github.com/Genius229/conversationaly/actions/runs/34490125378),
+commit `b094433`. [Download artifact 10158154233](https://github.com/Genius229/conversationaly/actions/runs/34490125378/artifacts/10158154233)
 (GitHub login required; artifacts expire after 14 days).
 Installer: `Conversationaly GigaSTT Dev_1.4.1_x64-setup.exe`.
-SHA256: `27e5b83e7c26aaf3b46c8688803336a768e1c6270f7e8da2f3bbe6a215771fbe`.
+SHA256: `033f1c9740e0172dc4d8bcdfa7113db911cc2147c845086ce10de46caeecc6f1`.
 
 The CI overlay uses `Conversationaly GigaSTT Dev` and identifier
 `com.conversationaly.gigastt-dev`: it has a separate install/data profile from
@@ -29,6 +29,11 @@ model download.
 ## Short functional pass
 
 - [ ] Install and launch on Windows x86-64 without Python, Docker or WSL.
+- [ ] On a fresh setup, verify no model download starts automatically. Choose
+      **Set up models later**, reach the app, restart and confirm no download
+      starts. Existing completed profiles should not be reset just to update.
+- [ ] Verify an explicit Download starts only that model; leaving an active
+      user-started download is labelled **Continue downloads in background**.
 - [ ] Confirm automatic final transcription is on and live transcript is off.
 - [ ] With no GigaSTT models, verify recording still starts without a Parakeet
       download; Stop saves the audio and reports actionable missing models.
@@ -44,6 +49,12 @@ model download.
       agree after a successful import. Do not publish their contents as evidence.
 - [ ] Re-transcribe an existing meeting. Cancel during preparation/transcription;
       confirm the original audio and prior transcript survive. Retry to Ready.
+- [ ] Use **Import audio → Import with GigaSTT** for an existing supported MP4.
+      Confirm the source hash is unchanged, the archived audio is playable,
+      final text appears and retry works after cancellation. No legacy speech
+      model should be required. Cancel is available after staging opens the
+      meeting page; application exit during staging must not leave a writer
+      racing database shutdown.
 - [ ] Force a failed job (for example by closing the app while it runs), restart,
       and confirm interrupted status with retry instead of a permanent spinner.
 - [ ] Confirm automatic summary waits for the final rows and, if enabled, speaker
