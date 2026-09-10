@@ -145,6 +145,7 @@ $windowsComponentDlls = [Collections.Generic.HashSet[string]]::new([StringCompar
 @(
     "advapi32.dll", "bcrypt.dll", "bcryptprimitives.dll", "combase.dll",
     "comdlg32.dll", "crypt32.dll", "dbghelp.dll", "dnsapi.dll", "gdi32.dll",
+    "d3d12.dll", "dxgi.dll", "dxcore.dll",
     "iphlpapi.dll", "kernel32.dll", "kernelbase.dll", "msvcp_win.dll",
     "ncrypt.dll", "netapi32.dll", "normaliz.dll", "ntdll.dll", "ole32.dll",
     "oleaut32.dll", "powrprof.dll", "psapi.dll", "rpcrt4.dll", "secur32.dll",
@@ -203,6 +204,7 @@ while ($pendingPeFiles.Count -gt 0) {
     if ($names.Count -eq 0) {
         throw "dumpbin reported no imported DLLs for $($pe.Name); refusing an incomplete inventory"
     }
+    Write-Host ("PE imports {0}: {1}" -f $pe.Name, ($names -join ", "))
 
     foreach ($name in $names) {
         $bundled = Join-Path $output $name
@@ -211,7 +213,14 @@ while ($pendingPeFiles.Count -gt 0) {
             $resolution = "bundled"
             $resolvedPath = $bundled
         }
-        elseif ($windowsComponentDlls.Contains($name) -or $name -match "(?i)^(api|ext)-ms-win-.*\.dll$") {
+        elseif ($name -match "(?i)^(api|ext)-ms-win-.*\.dll$") {
+            # API-set names are virtual loader contracts, not necessarily files.
+            # The offline native smoke verifies that Windows resolves them.
+            # https://learn.microsoft.com/windows/win32/apiindex/windows-apisets
+            $resolution = "windows-api-set"
+            $resolvedPath = "api-set:$name"
+        }
+        elseif ($windowsComponentDlls.Contains($name)) {
             if (-not (Test-Path -LiteralPath $system32 -PathType Leaf)) {
                 throw "Allowlisted Windows component '$name' imported by $($pe.Name) is absent from System32"
             }
