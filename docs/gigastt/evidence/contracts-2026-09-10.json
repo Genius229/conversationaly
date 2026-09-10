@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "verifiedDateUtc": "2026-09-10",
+  "repository": "Genius229/conversationaly",
+  "commit": "b9f26c7f8b4d6f6efda875b07953c1995b0a6a32",
+  "workflow": "GigaSTT contracts",
+  "runId": 34468472154,
+  "runUrl": "https://github.com/Genius229/conversationaly/actions/runs/34468472154",
+  "conclusion": "success",
+  "matrix": [
+    {
+      "runner": "ubuntu-latest",
+      "testsPassed": 98,
+      "testsFailed": 0,
+      "clippy": "passed"
+    },
+    {
+      "runner": "windows-latest",
+      "testsPassed": 92,
+      "testsFailed": 0,
+      "clippy": "passed",
+      "readinessTimeoutConsecutiveStressPasses": 20
+    }
+  ],
+  "scope": "Production Rust modules with owned fake subprocesses and loopback HTTP; not real model inference or physical-device acceptance"
+}

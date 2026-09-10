@@ -2,6 +2,11 @@
 
 Updated: 2026-09-10. Branch: `feat/gigastt-post-transcription`.
 
+**Automated integration gates passed:** full Windows Tauri/NSIS build, pinned
+GigaSTT native inference smoke, Windows/Ubuntu contract matrix, Clippy and
+frontend checks. UI/backend reviews approved. Remaining acceptance boundaries
+are listed below; this is an unsigned development build, not a production release.
+
 ## Implemented and locally exercised
 
 - Typed v2.18 jobs client. Loopback-only HTTP, no proxy/redirects, bounded body
@@ -78,7 +83,7 @@ physical microphone acceptance run.
 Full native check attempted with `cargo check -p conversationaly --offline`:
 blocked in `alsa-sys` because this Linux host lacks `alsa.pc`. The Tauri
 adapter and desktop dependency graph are therefore not certified by this
-headless test result.
+headless test result. They are compiled by the successful full Windows CI below.
 
 ## Windows gates
 
@@ -120,9 +125,14 @@ or audio) is in `evidence/windows-2026-09-10.json`. This remains a sidecar
 spike, not full installer/graceful-shutdown acceptance.
 
 Contract CI **PASS** on both Windows and Ubuntu:
-https://github.com/Genius229/conversationaly/actions/runs/34452923901
-(`ce82663`, preceding integration). This fixes the Windows canonical/short-path
-assertion exposed by run `34432100449`. Integration run `34463264459` (`119b77e`)
+https://github.com/Genius229/conversationaly/actions/runs/34468472154
+(`b9f26c7`). Ubuntu: **98 passed**, Windows: **92 passed**, plus **20 consecutive
+Windows readiness-timeout stress passes**; Clippy passed on both platforms.
+Platform counts differ because six tests are Unix-only.
+Evidence: `evidence/contracts-2026-09-10.json`.
+
+Earlier CI history: `ce82663` fixed the Windows canonical/short-path assertion
+exposed by run `34432100449`. Integration run `34463264459` (`119b77e`)
 passed Ubuntu but exposed a Windows test-fixture race: a cancelled readiness
 probe reset its socket, and fake-server `expect()` incorrectly crashed the
 process. The test-only fix tolerates disconnected writes, with a deterministic
@@ -138,8 +148,8 @@ transport errors explicitly, still fails malformed/unexpected requests, and
 records sanitized stage/kind diagnostics. Ten deterministic fixture tests cover
 these boundaries, including full 8,193-byte body preservation. The 98-test Linux
 suite and Clippy pass; CI now collects all suites with `--no-fail-fast` and runs
-the Windows readiness-timeout regression 20 consecutive times. Windows rerun
-pending.
+the Windows readiness-timeout regression 20 consecutive times. Final run
+`34468472154` passed all of these checks.
 
 Initial run `34429102821` failed workflow validation because `runner.temp`
 is not permitted at job env scope; fixed with step initialization. Run
@@ -156,11 +166,9 @@ both scripts locally without AST errors.
 
 1. Close the graceful Windows shutdown release limitation with a
    supported/proven mechanism (native build/inference smoke already passes).
-2. Finish the cross-platform contract CI after Windows fixture hardening. Full
-   Windows app compilation and installer payload verification have passed.
-3. Exercise the Rust model installer against the real pinned model host; current
+2. Exercise the Rust model installer against the real pinned model host; current
    installer tests use fake HTTP, while the proven Windows smoke uses PowerShell.
-4. Execute real Windows microphone/USB persistence, 60+ minute bounded-memory
+3. Execute real Windows microphone/USB persistence, 60+ minute bounded-memory
    recording, responsive UI, restart/cancel/retry and summary ordering acceptance.
    Keep upstream recording durability intact. Checklist: `windows-acceptance.md`.
 

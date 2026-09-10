@@ -76,7 +76,7 @@ Upstream `bykof/conversationaly` was cloned at `0359c12d492fbc6583229547989977ec
 - Test: `frontend/src-tauri/tests/post_transcription_import.rs`
 
 - [x] Add failing tests for PCM16/mono/16 kHz WAV output, segment/word timestamp conversion, speaker/confidence mapping, malformed results, and atomic replacement rollback.
-- [x] Reuse the existing retranscription decoder/resampler; write `.processing/gigastt-input.wav` and preserve it on failure. Native decoder adapter is source-wired; full desktop compile remains a separate gate.
+- [x] Reuse the existing retranscription decoder/resampler; write `.processing/gigastt-input.wav` and preserve it on failure. Native decoder adapter also compiled in full Windows desktop run `34463264744`.
 - [x] Validate the complete result, generate stable new row IDs, and replace draft/live rows in one transaction only after validation. Preserve canonical top-level `result.text` in `meeting_transcript_metadata.result_metadata.text` for Task 5 summaries.
 - [x] Implement the coordinator pipeline and progress sink, then run focused tests. Fourteen service tests cover cleanup/result retention and cancellation at the commit boundary; included in the integration commit.
 
@@ -118,6 +118,11 @@ See `docs/gigastt/implementation-status.md` for current verification boundaries.
 - [x] Publish automated build/installer evidence and commit the repeatable gate. `docs/gigastt/evidence/windows-desktop-2026-09-10.json`; this is not production release acceptance (graceful shutdown and physical Windows checks remain open).
 
 ## Verification matrix
+
+Latest automated evidence: Windows desktop/installer run `34463264744` PASS;
+contract run `34468472154` PASS (Ubuntu 98 tests, Windows 92 tests plus 20 stress
+repetitions, Clippy on both); frontend 9 tests, TypeScript and 12-page Next build
+PASS. Physical acceptance and graceful Windows shutdown remain open.
 
 - Rust unit/contract/integration tests for every post-transcription module.
 - Frontend typecheck/lint/tests for progress and settings state.
