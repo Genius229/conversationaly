@@ -25,6 +25,19 @@ function Save-Evidence {
         platform = [Environment]::OSVersion.VersionString
         cases = @($results.ToArray())
     } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $evidence 'acceptance.json') -Encoding utf8
+    # Preserve the actual installed layout even when the very first hash check
+    # fails. No recording/transcript contents or unrelated host files are read.
+    $tree = @()
+    if (Test-Path -LiteralPath $install -PathType Container) {
+        $tree = @(Get-ChildItem -LiteralPath $install -Recurse -File | ForEach-Object {
+            @{ path = [IO.Path]::GetRelativePath($install, $_.FullName); bytes = $_.Length; attributes = $_.Attributes.ToString() }
+        })
+    }
+    @{ requestedInstallDir = $install; files = $tree } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $evidence 'installed-tree.json')
+    $registered = @(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
+        Where-Object { $_.PSObject.Properties.Name -contains 'DisplayName' -and $_.DisplayName -eq 'Conversationaly GigaSTT Dev' } |
+        Select-Object DisplayName, InstallLocation, UninstallString, MainBinaryName)
+    $registered | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $evidence 'registered-installation.json')
 }
 
 function Start-Owned([string]$File, [string[]]$Arguments) {
