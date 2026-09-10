@@ -259,7 +259,7 @@ $packagedFiles = @(Get-ChildItem -LiteralPath $output -File | Where-Object { $_.
         sha256 = Get-Sha256Lower -Path $_.FullName
     }
 })
-if (($packagedFiles | Where-Object { $_.name -eq [string]$manifest.packaging.binaryName }).Count -ne 1) {
+if (@($packagedFiles | Where-Object { $_.name -eq [string]$manifest.packaging.binaryName }).Count -ne 1) {
     throw "Packaged file inventory does not contain exactly one gigastt.exe"
 }
 
