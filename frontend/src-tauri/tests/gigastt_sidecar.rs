@@ -48,6 +48,22 @@ fn pids(temp: &TempDir) -> Vec<u32> {
         .collect()
 }
 
+fn fixture_diagnostics(temp: &TempDir) -> String {
+    [
+        "fake-failures",
+        "fake-transport-diagnostics",
+        "fake-bind-errors",
+    ]
+    .into_iter()
+    .filter_map(|name| {
+        fs::read_to_string(model_dir(temp).join(name))
+            .ok()
+            .map(|value| format!("{name}:\n{value}"))
+    })
+    .collect::<Vec<_>>()
+    .join("\n")
+}
+
 #[cfg(unix)]
 fn process_exists(pid: u32) -> bool {
     unsafe extern "C" {
@@ -181,10 +197,24 @@ async fn readiness_timeout_fails_and_reaps_the_child() {
     let manager = GigasttSidecar::new(test_config(&temp, None)).unwrap();
 
     let result = manager.ensure_ready().await;
-    assert!(matches!(result, Err(SidecarError::StartupTimeout { .. })));
-    assert_eq!(manager.status().await, SidecarStatus::Failed);
+    assert!(
+        matches!(result, Err(SidecarError::StartupTimeout { .. })),
+        "fixture diagnostics:\n{}",
+        fixture_diagnostics(&temp)
+    );
+    assert_eq!(
+        manager.status().await,
+        SidecarStatus::Failed,
+        "fixture diagnostics:\n{}",
+        fixture_diagnostics(&temp)
+    );
     let children = pids(&temp);
-    assert_eq!(children.len(), 1);
+    assert_eq!(
+        children.len(),
+        1,
+        "fixture diagnostics:\n{}",
+        fixture_diagnostics(&temp)
+    );
     #[cfg(unix)]
     wait_until(|| !process_exists(children[0]), "timed-out child reap").await;
 }

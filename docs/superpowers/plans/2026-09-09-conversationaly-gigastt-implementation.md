@@ -113,9 +113,9 @@ See `docs/gigastt/implementation-status.md` for current verification boundaries.
 - Create: Windows E2E smoke harness and test fixture manifest
 
 - [x] Build the pinned sidecar on a Windows x86-64 runner, start it with a model fixture, transcribe Russian WAV, and assert timestamps/language/non-empty text.
-- [ ] Verify installer includes executable and native runtime files but no Python dependency.
+- [x] Verify installer includes executable and native runtime files but no Python dependency. Full Tauri/NSIS run `34463264744` (`119b77e`) PASS; executable and co-located DLL hashes verified after extraction.
 - [ ] Execute manual acceptance: USB mic persistence, 60+ minute bounded-memory recording, responsive UI, restart recovery, cancel/retry, and summary ordering.
-- [ ] Publish evidence and commit the release gate.
+- [x] Publish automated build/installer evidence and commit the repeatable gate. `docs/gigastt/evidence/windows-desktop-2026-09-10.json`; this is not production release acceptance (graceful shutdown and physical Windows checks remain open).
 
 ## Verification matrix
 

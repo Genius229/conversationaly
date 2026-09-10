@@ -38,6 +38,15 @@ jobs:
         with:
           workspaces: tools/gigastt-contract-tests -> target
       - name: Test production modules against owned fake processes
-        run: cargo test --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked --features gigastt-test-fixtures
+        run: cargo test --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked --features gigastt-test-fixtures --no-fail-fast
+      - name: Repeat Windows cancelled-probe lifecycle regression
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          for ($attempt = 1; $attempt -le 20; $attempt++) {
+            Write-Host "Cancelled-probe regression $attempt/20"
+            cargo test --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked --features gigastt-test-fixtures --test gigastt_sidecar readiness_timeout_fails_and_reaps_the_child -- --exact
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
       - name: Clippy
         run: cargo clippy --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked --features gigastt-test-fixtures --all-targets -- -D warnings

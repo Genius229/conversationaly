@@ -61,9 +61,9 @@ cd ..
 git diff --check
 ```
 
-Local Rust result: **89 passed, 0 failed** (15 client + 15 process lifecycle +
+Local Rust result: **98 passed, 0 failed** (15 client + 15 process lifecycle +
 9 audio preparation + 10 importer + 14 service + 15 models + 6 durable job state
-+ 2 preview + 1 finalization + 1 environment + 1 disconnected-probe regression),
++ 2 preview + 1 finalization + 1 environment + 10 fake transport regressions),
 Clippy exit 0.
 Tests require permission to open loopback sockets; a socket-restricted sandbox
 is not a supported execution environment for these contract tests.
@@ -88,10 +88,10 @@ headless test result.
 - `GigaSTT desktop Windows check`: calls the pinned native build, verifies its
   same-run artifact, builds the real CPU llama-helper and full Tauri application,
   then extracts the unsigned development NSIS installer and verifies co-located
-  GigaSTT executable/DLL hashes. First run `34463264744` (`119b77e`) has passed
-  the native GigaSTT smoke and is building the desktop application; full build
-  and installer results are still pending. Unsigned development artifacts are
-  not production releases.
+  GigaSTT executable/DLL hashes. Run `34463264744` (`119b77e`) **PASS**, including
+  full native Tauri compilation, CPU llama-helper, portable ggml flags, NSIS
+  extraction/runtime hash verification and installer upload. Unsigned development
+  artifacts are not production releases.
   The development overlay uses a separate product name and identifier, so its
   install directory and AppData/DB do not replace the regular application.
 - The packaging overlay is **opt-in**; ordinary Windows builds do not depend
@@ -99,8 +99,18 @@ headless test result.
 - **Graceful Windows shutdown remains a release limitation.** The desktop
   manager currently uses bounded force/reap on Windows; Unix uses SIGTERM
   with bounded fallback. Do not label forced termination as graceful.
-- No native Windows PASS or installer acceptance is claimed before actual
-  CI/hardware evidence. The workflow being present is not that evidence.
+- Automated installer payload verification is proven by CI. Installed-app
+  interaction and physical-device acceptance are separate, still-open checks.
+
+Full desktop build and packaging **PASS**:
+https://github.com/Genius229/conversationaly/actions/runs/34463264744
+(`119b77e`). Installer artifact: `10148002744`,
+`Conversationaly GigaSTT Dev_1.4.1_x64-setup.exe` (62,198,456 bytes).
+Downloaded installer SHA256:
+`4023143dae30b4f6539f12b0e91ca98658cea315a190b151499424ddc2d7a64c`.
+Metadata-only evidence: `evidence/windows-desktop-2026-09-10.json`.
+Subsequent commits so far change only tests/CI/docs, not the packaged production
+code. Native spike in this run: 4 s audio, startup 3.087 s, job 1.57 s.
 
 Native build/inference **PASS**:
 https://github.com/Genius229/conversationaly/actions/runs/34430238245
@@ -121,8 +131,15 @@ pass, then exposed a model-progress test's fixed wall-time assumption: Windows
 timer granularity stretched 120 short sleeps, allowing more legitimate 100 ms
 updates. That assertion now uses actual elapsed time and checks intermediate
 event spacing, while retaining exact initial/final byte assertions. Production
-supervisor/installer behavior is unchanged. Updated 89-test Linux suite and
-Clippy pass; Windows rerun pending.
+supervisor/installer behavior is unchanged. Run `34466298943` showed the
+write-only disconnect fix was incomplete: request-header/body reads and queued
+Windows accepts also need disconnect handling. The fake now handles expected
+transport errors explicitly, still fails malformed/unexpected requests, and
+records sanitized stage/kind diagnostics. Ten deterministic fixture tests cover
+these boundaries, including full 8,193-byte body preservation. The 98-test Linux
+suite and Clippy pass; CI now collects all suites with `--no-fail-fast` and runs
+the Windows readiness-timeout regression 20 consecutive times. Windows rerun
+pending.
 
 Initial run `34429102821` failed workflow validation because `runner.temp`
 is not permitted at job env scope; fixed with step initialization. Run
@@ -139,8 +156,8 @@ both scripts locally without AST errors.
 
 1. Close the graceful Windows shutdown release limitation with a
    supported/proven mechanism (native build/inference smoke already passes).
-2. Run the full Windows app/installer CI and fix native compilation or packaging
-   failures. Headless tests do not compile the Tauri adapters.
+2. Finish the cross-platform contract CI after Windows fixture hardening. Full
+   Windows app compilation and installer payload verification have passed.
 3. Exercise the Rust model installer against the real pinned model host; current
    installer tests use fake HTTP, while the proven Windows smoke uses PowerShell.
 4. Execute real Windows microphone/USB persistence, 60+ minute bounded-memory

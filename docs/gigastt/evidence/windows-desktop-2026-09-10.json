@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "verifiedDateUtc": "2026-09-10",
+  "repository": "Genius229/conversationaly",
+  "commit": "119b77eea73a522b38a1ea9340224a3d78d7350c",
+  "workflow": "GigaSTT desktop Windows check",
+  "runId": 34463264744,
+  "runUrl": "https://github.com/Genius229/conversationaly/actions/runs/34463264744",
+  "conclusion": "success",
+  "target": "x86_64-pc-windows-msvc",
+  "profile": "release-cpu-unsigned-development",
+  "productName": "Conversationaly GigaSTT Dev",
+  "identifier": "com.conversationaly.gigastt-dev",
+  "gigastt": {
+    "version": "2.18.0",
+    "sourceCommit": "b4f7531b5e54af69e4766bb36c14cc6745e452b2",
+    "runtimeArtifactId": 10146768588,
+    "smokeEvidenceArtifactId": 10146766466,
+    "smoke": {
+      "durationSeconds": 4.0,
+      "wordCount": 6,
+      "segmentCount": 1,
+      "cyrillicWordCount": 6,
+      "startupElapsedSeconds": 3.087,
+      "jobElapsedSeconds": 1.57,
+      "punctuation": true,
+      "itn": true,
+      "shutdown": "forced-reaped"
+    }
+  },
+  "installer": {
+    "artifactId": 10148002744,
+    "artifactName": "conversationaly-gigastt-windows-unsigned-dev",
+    "filename": "Conversationaly GigaSTT Dev_1.4.1_x64-setup.exe",
+    "sizeBytes": 62198456,
+    "sha256": "4023143dae30b4f6539f12b0e91ca98658cea315a190b151499424ddc2d7a64c"
+  },
+  "checks": {
+    "pinnedNativeBuildAndSmoke": "passed",
+    "realLlamaHelperCpuBuild": "passed",
+    "fullTauriBuild": "passed",
+    "portableGgmlInstructionFloor": "passed",
+    "nsisRuntimeColocationAndHashes": "passed",
+    "installerDownloadedAndHashed": "passed"
+  },
+  "notVerified": [
+    "graceful Windows sidecar shutdown",
+    "physical Windows microphone and USB persistence",
+    "60-minute recording memory and responsiveness",
+    "interactive installed-app cancellation, recovery and summary ordering",
+    "real model-host download through the Rust installer"
+  ]
+}
