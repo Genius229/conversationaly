@@ -13,6 +13,19 @@ def read(relative: str) -> str:
     return (SRC_TAURI / relative).read_text(encoding="utf-8")
 
 
+def render_one_handlebars_path_token(source: str, token: str, value: str) -> str:
+    """Render one token with Handlebars' odd-backslash escape semantics."""
+    index = source.index(token)
+    slash_start = index
+    while slash_start > 0 and source[slash_start - 1] == "\\":
+        slash_start -= 1
+    slash_count = index - slash_start
+    prefix = source[:slash_start] + ("\\" * (slash_count // 2))
+    if slash_count % 2:
+        return prefix + token + source[index + len(token) :]
+    return prefix + value + source[index + len(token) :]
+
+
 class InstallerContractTests(unittest.TestCase):
     def test_gigastt_overlays_pin_reviewed_template_and_hooks(self) -> None:
         for overlay in (
@@ -74,9 +87,55 @@ class InstallerContractTests(unittest.TestCase):
             'SetOutPath "$PLUGINSDIR\\conversationaly-payload"', install
         )
         self.assertIn(
-            'CreateDirectory "$PLUGINSDIR\\conversationaly-payload\\{{this}}"',
+            '/oname=$PLUGINSDIR\\conversationaly-payload\\${MAINBINARYNAME}.exe',
             install,
         )
+        resource_file_line = next(
+            line
+            for line in install.splitlines()
+            if "File /a" in line and "{{this.[1]}}" in line
+        )
+        rendered_resource_file = render_one_handlebars_path_token(
+            resource_file_line, "{{this.[1]}}", "gigastt\\DirectML.dll"
+        )
+        self.assertIn(
+            '/oname=$PLUGINSDIR\\conversationaly-payload\\gigastt\\DirectML.dll',
+            rendered_resource_file,
+        )
+
+        binary_file_line = next(
+            line
+            for line in install.splitlines()
+            if "File /a" in line and "{{this}}" in line
+        )
+        rendered_binary_file = render_one_handlebars_path_token(
+            binary_file_line, "{{this}}", "ffmpeg.exe"
+        )
+        self.assertIn(
+            '/oname=$PLUGINSDIR\\conversationaly-payload\\ffmpeg.exe',
+            rendered_binary_file,
+        )
+
+        resource_dir_line = next(
+            line
+            for line in install.splitlines()
+            if "CreateDirectory" in line and "{{this}}" in line
+        )
+        rendered_resource_dir = render_one_handlebars_path_token(
+            resource_dir_line, "{{this}}", "gigastt"
+        )
+        self.assertIn(
+            '$PLUGINSDIR\\conversationaly-payload\\gigastt',
+            rendered_resource_dir,
+        )
+        for directory in ("gigastt", "templates"):
+            self.assertIn(
+                f'CreateDirectory "$PLUGINSDIR\\conversationaly-payload\\{directory}"',
+                install,
+            )
+        self.assertIn("ClearErrors", install)
+        self.assertIn("${If} ${Errors}", install)
+        self.assertIn("SetErrorLevel 13", install)
         self.assertNotIn('CreateDirectory "$INSTDIR\\\\{{this}}"', install)
         self.assertLess(
             install.rindex("  File "),
@@ -203,6 +262,60 @@ class InstallerContractTests(unittest.TestCase):
                 (runtime / "unknown-user-sentinel.bin").read_bytes(), b"preserve-me"
             )
             self.assertEqual((runtime / "DirectML.dll").read_bytes(), b"new-dll")
+
+    def test_deploy_rejects_incomplete_staged_runtime_before_target_changes(self) -> None:
+        powershell = shutil.which("pwsh") or shutil.which("powershell.exe")
+        bundled_pwsh = (
+            SRC_TAURI.parents[1] / "tools/gigastt-contract-tests/target/pwsh/pwsh"
+        )
+        if powershell is None and bundled_pwsh.is_file():
+            powershell = str(bundled_pwsh)
+        if powershell is None:
+            self.skipTest("PowerShell is unavailable")
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            install = root / "install"
+            payload = root / "payload"
+            runtime = payload / "gigastt"
+            install.mkdir()
+            runtime.mkdir(parents=True)
+            (install / "conversationaly.exe").write_bytes(b"old-main")
+            (payload / "conversationaly.exe").write_bytes(b"new-main")
+            (runtime / "runtime-inventory.json").write_text(
+                json.dumps({"packagedFiles": [{"name": "DirectML.dll"}]}),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    powershell,
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(SRC_TAURI / "installer/gigastt-installer-preflight.ps1"),
+                    "-Mode",
+                    "Deploy",
+                    "-InstallDir",
+                    str(install),
+                    "-MainBinaryName",
+                    "conversationaly.exe",
+                    "-PayloadDir",
+                    str(payload),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 13, result.stdout + result.stderr)
+            self.assertEqual(
+                (install / "conversationaly.exe").read_bytes(), b"old-main"
+            )
+            self.assertFalse((install / "gigastt").exists())
 
 
 if __name__ == "__main__":

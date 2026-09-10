@@ -1,0 +1,160 @@
+name: GigaSTT installer repackage and acceptance
+
+# Installer-only iteration: reuse byte-identical, already compiled application
+# binaries. A source-diff guard prevents using this to ship uncompiled app code.
+on:
+  push:
+    branches: [feat/gigastt-post-transcription]
+    paths: ['.github/workflows/gigastt-installer-repackage.yml']
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'Windows build run containing the compiled candidate'
+        required: true
+        default: '34504810184'
+      source_artifact:
+        description: 'Candidate artifact name'
+        required: true
+        default: 'conversationaly-gigastt-windows-failed-candidate'
+      source_installer_sha256:
+        description: 'Expected original installer SHA256'
+        required: true
+        default: 'dd0a0d99ceb8dfc1300663bc53ea4497c574a56f9fd833320f220c797a3c72d9'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  repackage:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      SOURCE_RUN_ID: ${{ inputs.source_run_id || '34504810184' }}
+      SOURCE_INSTALLER_SHA256: ${{ inputs.source_installer_sha256 || 'dd0a0d99ceb8dfc1300663bc53ea4497c574a56f9fd833320f220c797a3c72d9' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require unchanged compiled application and configuration
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:SOURCE_RUN_ID" --jq .head_sha
+          if ($LASTEXITCODE -ne 0 -or $source -notmatch '^[0-9a-f]{40}$') { throw 'Cannot identify source build' }
+          $changes = @(git diff --name-only $source HEAD)
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot compare application source revisions' }
+          $unsafe = @($changes | Where-Object { $_ -notmatch '^(\.github/workflows/|docs/|frontend/src-tauri/installer/|frontend/src-tauri/tests/|tools/windows-installer-tests/|tools/gigastt-contract-tests/)' })
+          if ($unsafe.Count -ne 0) { throw "Application or configuration changed; use a full Windows build instead: $unsafe" }
+          "SOURCE_COMMIT=$source" >> $env:GITHUB_ENV
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.source_artifact || 'conversationaly-gigastt-windows-failed-candidate' }}
+          path: source-installer
+          run-id: ${{ env.SOURCE_RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Recover and verify the compiled payload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installers = @(Get-ChildItem source-installer -Recurse -File -Filter '*-setup.exe')
+          if ($installers.Count -ne 1) { throw 'Expected one source installer' }
+          $hash = (Get-FileHash -LiteralPath $installers[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne $env:SOURCE_INSTALLER_SHA256) { throw 'Original installer hash mismatch' }
+          $out = Join-Path $env:RUNNER_TEMP 'repackage-source'
+          & 7z x $installers[0].FullName "-o$out" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Could not extract original candidate' }
+          $inventories = @(Get-ChildItem $out -Recurse -File -Filter runtime-inventory.json)
+          if ($inventories.Count -ne 1) { throw 'Expected one original runtime inventory' }
+          $inventory = Get-Content -LiteralPath $inventories[0].FullName -Raw | ConvertFrom-Json
+          if (@($inventory.packagedFiles).Count -lt 6) { throw 'Incomplete runtime inventory' }
+          $runtime = 'frontend/src-tauri/binaries/gigastt-runtime'
+          New-Item -ItemType Directory -Path $runtime, 'target/release' -Force | Out-Null
+          foreach ($file in $inventory.packagedFiles) {
+            if ($file.name -ne [IO.Path]::GetFileName($file.name) -or $file.name -match '[:/\\]') { throw 'Invalid inventory path' }
+            $path = Join-Path $inventories[0].DirectoryName $file.name
+            if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $file.sha256) { throw 'Original runtime hash mismatch' }
+          }
+          Get-ChildItem -LiteralPath $inventories[0].DirectoryName -File | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $runtime }
+          $binaries = @{}
+          foreach ($name in @('conversationaly.exe', 'llama-helper.exe', 'ffmpeg.exe')) {
+            $files = @(Get-ChildItem $out -Recurse -File -Filter $name)
+            if ($files.Count -ne 1) { throw "Expected one original $name" }
+            $binaries[$name] = (Get-FileHash -LiteralPath $files[0].FullName -Algorithm SHA256).Hash
+            $target = if ($name -eq 'conversationaly.exe') { 'target/release/conversationaly.exe' } else { 'frontend/src-tauri/binaries/' + [IO.Path]::GetFileNameWithoutExtension($name) + '-x86_64-pc-windows-msvc.exe' }
+            Copy-Item -LiteralPath $files[0].FullName -Destination $target
+          }
+          $evidence = Join-Path $env:RUNNER_TEMP 'installer-acceptance-evidence'
+          New-Item -ItemType Directory -Path $evidence -Force | Out-Null
+          @{ sourceRun = $env:SOURCE_RUN_ID; sourceCommit = $env:SOURCE_COMMIT; sourceInstallerSha256 = $hash; repackageCommit = $env:GITHUB_SHA; binaryHashes = $binaries } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $evidence 'repackage-provenance.json')
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install pinned bundler dependencies and validate frontend assets
+        working-directory: frontend
+        shell: pwsh
+        run: |
+          pnpm install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Bundle the unchanged compiled app with the corrected installer
+        working-directory: frontend
+        run: pnpm exec tauri bundle --ci --config src-tauri/tauri.gigastt.ci.conf.json
+      - name: Verify binary identity and perform real install/upgrade acceptance
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installers = @(Get-ChildItem target/release/bundle/nsis/*.exe)
+          if ($installers.Count -ne 1) { throw 'Expected one repackaged installer' }
+          $script = Get-Content target/release/nsis/x64/installer.nsi -Raw
+          if ($script.Contains('{{this')) { throw 'Unexpanded Handlebars resource path in rendered NSIS script' }
+          $out = Join-Path $env:RUNNER_TEMP 'repackage-result'
+          & 7z x $installers[0].FullName "-o$out" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Could not inspect repackaged installer' }
+          $evidence = Join-Path $env:RUNNER_TEMP 'installer-acceptance-evidence'
+          $provenance = Get-Content (Join-Path $evidence 'repackage-provenance.json') -Raw | ConvertFrom-Json
+          $provenance | Add-Member -NotePropertyName installerSha256 -NotePropertyValue ((Get-FileHash -LiteralPath $installers[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant())
+          $provenance | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $evidence 'repackage-provenance.json')
+          foreach ($entry in $provenance.binaryHashes.PSObject.Properties) {
+            $files = @(Get-ChildItem $out -Recurse -File -Filter $entry.Name)
+            if ($files.Count -ne 1 -or (Get-FileHash -LiteralPath $files[0].FullName -Algorithm SHA256).Hash -ne $entry.Value) { throw "Compiled binary changed: $($entry.Name)" }
+          }
+          ./tools/windows-installer-tests/acceptance.ps1 -Installer $installers[0].FullName -EvidenceDir $evidence -TestCooperativeQuit
+      - name: Upload proven unsigned development installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: conversationaly-gigastt-windows-unsigned-dev
+          path: target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload repackage provenance and acceptance results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-acceptance-evidence
+          path: ${{ runner.temp }}/installer-acceptance-evidence
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Retain rendered NSIS script for packaging diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rendered-nsis-script
+          path: target/release/nsis/x64/*.nsi
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Retain failed candidate for diagnostics only
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conversationaly-gigastt-windows-failed-candidate
+          path: target/release/bundle/nsis/*.exe
+          if-no-files-found: ignore
+          retention-days: 7

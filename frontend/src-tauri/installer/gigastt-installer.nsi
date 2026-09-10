@@ -604,29 +604,42 @@ Section Install
     !insertmacro NSIS_HOOK_PREINSTALL
   !endif
   SetOutPath "$PLUGINSDIR\conversationaly-payload"
+  ClearErrors
 
   ; CONVERSATIONALY PATCH START: NSIS extracts only into its private temp
   ; payload. The helper publishes all files as one rollback-capable operation,
   ; so a locked DLL can never leave a mixed runtime in $INSTDIR.
   ; Copy main executable
-  File /oname=${MAINBINARYNAME}.exe "${MAINBINARYSRCPATH}"
+  File "/oname=$PLUGINSDIR\conversationaly-payload\${MAINBINARYNAME}.exe" "${MAINBINARYSRCPATH}"
 
   ; Copy resources
+  ; These two directories are owned by the GigaSTT overlays. Keep the generic
+  ; loop below for all current and future resource mappings as well.
+  CreateDirectory "$PLUGINSDIR\conversationaly-payload\gigastt"
+  CreateDirectory "$PLUGINSDIR\conversationaly-payload\templates"
   {{#each resources_dirs}}
-    CreateDirectory "$PLUGINSDIR\conversationaly-payload\{{this}}"
+    CreateDirectory "$PLUGINSDIR\conversationaly-payload\\{{this}}"
   {{/each}}
   {{#each resources}}
-    File /a "/oname={{this.[1]}}" "{{no-escape @key}}"
+    File /a "/oname=$PLUGINSDIR\conversationaly-payload\\{{this.[1]}}" "{{no-escape @key}}"
   {{/each}}
 
   ; Copy external binaries
   {{#each binaries}}
-    File /a "/oname={{this}}" "{{no-escape @key}}"
+    File /a "/oname=$PLUGINSDIR\conversationaly-payload\\{{this}}" "{{no-escape @key}}"
   {{/each}}
 
   ; Generate the new uninstaller into the same private payload. The installed
   ; uninstaller is replaced by the transaction, never by a later direct write.
   WriteUninstaller "$PLUGINSDIR\conversationaly-payload\uninstall.exe"
+
+  ; In silent mode NSIS may skip a failed File instruction. Never deploy or
+  ; report success after an incomplete private extraction.
+  ${If} ${Errors}
+    DetailPrint "The installer could not stage its complete payload."
+    SetErrorLevel 13
+    Quit
+  ${EndIf}
 
   !insertmacro CONVERSATIONALY_DEPLOY_STAGED_PAYLOAD
   ; CONVERSATIONALY PATCH END: transactional payload deployment.

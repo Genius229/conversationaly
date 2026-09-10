@@ -301,6 +301,55 @@ function Copy-PayloadToSiblingStage(
     }
 }
 
+function Assert-StagedRuntimeComplete([string]$SourceRoot) {
+    $runtimeRoot = Join-Path $SourceRoot "gigastt"
+    $inventoryPath = Join-Path $runtimeRoot "runtime-inventory.json"
+    if (-not (Test-Path -LiteralPath $inventoryPath -PathType Leaf)) {
+        Exit-Unsafe "The staged GigaSTT runtime inventory is missing. Setup did not change the installation."
+    }
+
+    try {
+        $inventory = Get-Content -LiteralPath $inventoryPath -Raw -ErrorAction Stop |
+            ConvertFrom-Json -ErrorAction Stop
+        $packagedFiles = @($inventory.packagedFiles)
+    }
+    catch {
+        Exit-Unsafe (
+            "The staged GigaSTT runtime inventory is invalid. Setup did not change the installation: " +
+            $_.Exception.Message
+        )
+    }
+    if ($packagedFiles.Count -eq 0) {
+        Exit-Unsafe "The staged GigaSTT runtime inventory is empty. Setup did not change the installation."
+    }
+
+    $names = @{}
+    foreach ($file in $packagedFiles) {
+        $name = [string]$file.name
+        if (
+            [string]::IsNullOrWhiteSpace($name) -or
+            [IO.Path]::IsPathRooted($name) -or
+            [IO.Path]::GetFileName($name) -ne $name -or
+            $name.Contains("\") -or
+            $name.Contains("/") -or
+            $name -eq "." -or
+            $name -eq ".." -or
+            $names.ContainsKey($name)
+        ) {
+            Exit-Unsafe "The staged GigaSTT runtime inventory contains an unsafe or duplicate file name."
+        }
+        $names[$name] = $true
+
+        $path = Join-Path $runtimeRoot $name
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            Exit-Unsafe (
+                "The staged GigaSTT runtime is incomplete: '$name' is missing. " +
+                "Setup did not change the installation."
+            )
+        }
+    }
+}
+
 function Deploy-PayloadTransactionally(
     [string]$InstallRoot,
     [string]$SourceRoot,
@@ -312,6 +361,7 @@ function Deploy-PayloadTransactionally(
     if (-not (Test-Path -LiteralPath (Join-Path $SourceRoot $ExpectedMainBinaryName) -PathType Leaf)) {
         Exit-Unsafe "The staged main executable is missing. Setup did not change the installation."
     }
+    Assert-StagedRuntimeComplete $SourceRoot
 
     $parent = Split-Path -Parent $InstallRoot
     $transactionId = [Guid]::NewGuid().ToString("N")
