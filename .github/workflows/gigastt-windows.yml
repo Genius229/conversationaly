@@ -1,0 +1,227 @@
+name: GigaSTT native Windows gate
+
+on:
+  push:
+    branches:
+      - feat/gigastt-post-transcription
+    paths:
+      - '.github/workflows/gigastt-windows.yml'
+      - 'scripts/gigastt/**'
+      - 'frontend/src-tauri/tauri.gigastt.windows.conf.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gigastt-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-build-smoke:
+    name: GigaSTT v2.18.0 Windows x64 CPU
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      GIGASTT_SOURCE_DIR: ${{ github.workspace }}\.gigastt-src
+      GIGASTT_RUNTIME_DIR: ${{ github.workspace }}\frontend\src-tauri\binaries\gigastt-runtime
+      GIGASTT_MODEL_DIR: ${{ runner.temp }}\gigastt-model-v2.18.0
+      GIGASTT_EVIDENCE_DIR: ${{ runner.temp }}\gigastt-windows-evidence
+      GIGASTT_MANIFEST: ${{ github.workspace }}\scripts\gigastt\windows-resources.json
+
+    steps:
+      - name: Checkout Conversationaly
+        uses: actions/checkout@v4
+
+      - name: Validate committed pins
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $manifest = Get-Content -LiteralPath $env:GIGASTT_MANIFEST -Raw | ConvertFrom-Json
+          if ($manifest.gigastt.version -ne "2.18.0") { throw "Unexpected GigaSTT version pin" }
+          if ($manifest.gigastt.sourceCommit -ne "b4f7531b5e54af69e4766bb36c14cc6745e452b2") { throw "Unexpected source commit pin" }
+          if ($manifest.toolchain.rust -ne "1.88.0") { throw "Unexpected Rust pin" }
+          if ($manifest.toolchain.protoc -ne "30.2") { throw "Unexpected protoc pin" }
+          if ($manifest.toolchain.target -ne "x86_64-pc-windows-msvc") { throw "Unexpected target pin" }
+          if ($manifest.fixture.sha256 -ne "500d2e88a1634ee766fec46f83cb903f3a1c276b2cedb36f11db800a1c4c14d0") { throw "Unexpected fixture pin" }
+
+      - name: Checkout pinned GigaSTT source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $manifest = Get-Content -LiteralPath $env:GIGASTT_MANIFEST -Raw | ConvertFrom-Json
+          New-Item -ItemType Directory -Path $env:GIGASTT_SOURCE_DIR -Force | Out-Null
+          git -C $env:GIGASTT_SOURCE_DIR init
+          if ($LASTEXITCODE -ne 0) { throw "git init failed" }
+          git -C $env:GIGASTT_SOURCE_DIR remote add origin $manifest.gigastt.sourceRepository
+          if ($LASTEXITCODE -ne 0) { throw "git remote add failed" }
+          git -C $env:GIGASTT_SOURCE_DIR fetch --no-tags --depth=1 origin $manifest.gigastt.sourceCommit
+          if ($LASTEXITCODE -ne 0) { throw "git fetch source commit failed" }
+          git -C $env:GIGASTT_SOURCE_DIR checkout --detach FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) { throw "git checkout source commit failed" }
+          $tagRef = "refs/tags/$($manifest.gigastt.sourceTag):refs/tags/$($manifest.gigastt.sourceTag)"
+          git -C $env:GIGASTT_SOURCE_DIR fetch --no-tags --depth=1 origin $tagRef
+          if ($LASTEXITCODE -ne 0) { throw "git fetch source tag failed" }
+          $head = (git -C $env:GIGASTT_SOURCE_DIR rev-parse HEAD).Trim()
+          $tag = (git -C $env:GIGASTT_SOURCE_DIR rev-list -n 1 $manifest.gigastt.sourceTag).Trim()
+          if ($head -ne $manifest.gigastt.sourceCommit -or $tag -ne $head) {
+            throw "Source/tag pin mismatch: head=$head tag=$tag"
+          }
+
+      - name: Verify public Russian fixture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $manifest = Get-Content -LiteralPath $env:GIGASTT_MANIFEST -Raw | ConvertFrom-Json
+          $fixture = Join-Path $env:GIGASTT_SOURCE_DIR $manifest.fixture.sourceRelativePath
+          $actual = (Get-FileHash -LiteralPath $fixture -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $manifest.fixture.sha256) {
+            throw "Fixture SHA-256 mismatch: expected $($manifest.fixture.sha256), got $actual"
+          }
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.88.0
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install pinned protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "30.2"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache GigaSTT Cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .gigastt-src -> target
+          shared-key: gigastt-v2.18.0-windows-x64-cpu-rust-1.88.0
+          cache-on-failure: false
+
+      - name: Build and inventory native runtime
+        shell: pwsh
+        run: |
+          ./scripts/gigastt/windows-build.ps1 `
+            -SourceDir $env:GIGASTT_SOURCE_DIR `
+            -OutputDir $env:GIGASTT_RUNTIME_DIR `
+            -ManifestPath $env:GIGASTT_MANIFEST
+
+      - name: Cache pinned model files
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\gigastt-model-v2.18.0
+          key: gigastt-v2.18.0-rnnt-int8-windows-x64-c52665e9-punct-b105da02-vad-2623a295
+
+      - name: Download and verify pinned model assets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+          $manifest = Get-Content -LiteralPath $env:GIGASTT_MANIFEST -Raw | ConvertFrom-Json
+          New-Item -ItemType Directory -Path $env:GIGASTT_MODEL_DIR -Force | Out-Null
+
+          # A corrupted restored cache entry is removed so the pinned GigaSTT
+          # downloader can repair it. Every file is verified again below.
+          foreach ($file in $manifest.model.mainFiles) {
+            $path = Join-Path $env:GIGASTT_MODEL_DIR $file.relativePath
+            if (Test-Path -LiteralPath $path -PathType Leaf) {
+              $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+              if ($actual -ne $file.sha256) { Remove-Item -LiteralPath $path -Force }
+            }
+          }
+
+          $binary = Join-Path $env:GIGASTT_RUNTIME_DIR $manifest.packaging.binaryName
+          & $binary download `
+            --model-dir $env:GIGASTT_MODEL_DIR `
+            --model-variant rnnt `
+            --skip-diarization `
+            --progress json
+          if ($LASTEXITCODE -ne 0) { throw "Pinned GigaSTT model download failed with exit code $LASTEXITCODE" }
+
+          foreach ($file in $manifest.model.mainFiles) {
+            $path = Join-Path $env:GIGASTT_MODEL_DIR $file.relativePath
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing model file $path" }
+            $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $file.sha256) {
+              throw "Model SHA-256 mismatch for $($file.relativePath): expected $($file.sha256), got $actual"
+            }
+          }
+
+          foreach ($file in $manifest.model.sideFiles) {
+            $path = Join-Path $env:GIGASTT_MODEL_DIR $file.relativePath
+            $valid = $false
+            if (Test-Path -LiteralPath $path -PathType Leaf) {
+              $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+              $valid = $actual -eq $file.sha256
+              if (-not $valid) { Remove-Item -LiteralPath $path -Force }
+            }
+            if (-not $valid) {
+              New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force | Out-Null
+              $partial = "$path.partial"
+              Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue
+              Invoke-WebRequest -Uri $file.url -OutFile $partial -TimeoutSec 300
+              $actual = (Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash.ToLowerInvariant()
+              if ($actual -ne $file.sha256) {
+                Remove-Item -LiteralPath $partial -Force
+                throw "Side-model SHA-256 mismatch for $($file.relativePath): expected $($file.sha256), got $actual"
+              }
+              Move-Item -LiteralPath $partial -Destination $path
+            }
+          }
+
+          $partials = @(Get-ChildItem -LiteralPath $env:GIGASTT_MODEL_DIR -Recurse -File -Filter "*.partial")
+          if ($partials.Count -ne 0) { throw "Partial model files remain after download" }
+
+      - name: Native Windows jobs smoke
+        shell: pwsh
+        run: |
+          $manifest = Get-Content -LiteralPath $env:GIGASTT_MANIFEST -Raw | ConvertFrom-Json
+          $fixture = Join-Path $env:GIGASTT_SOURCE_DIR $manifest.fixture.sourceRelativePath
+          $binary = Join-Path $env:GIGASTT_RUNTIME_DIR $manifest.packaging.binaryName
+          ./scripts/gigastt/windows-smoke.ps1 `
+            -Binary $binary `
+            -Audio $fixture `
+            -ModelDir $env:GIGASTT_MODEL_DIR `
+            -PunctModelDir (Join-Path $env:GIGASTT_MODEL_DIR "punct") `
+            -VadModelDir (Join-Path $env:GIGASTT_MODEL_DIR "vad") `
+            -ExpectedAudioSha256 $manifest.fixture.sha256 `
+            -EvidenceDir $env:GIGASTT_EVIDENCE_DIR `
+            -StartupTimeoutSeconds 180 `
+            -JobTimeoutSeconds 180 `
+            -RequestTimeoutSeconds 15 `
+            -ShutdownTimeoutSeconds 20
+
+      - name: Verify opt-in Tauri resource stage
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $manifest = Get-Content -LiteralPath $env:GIGASTT_MANIFEST -Raw | ConvertFrom-Json
+          $overlayPath = Join-Path $env:GITHUB_WORKSPACE "frontend/src-tauri/tauri.gigastt.windows.conf.json"
+          $overlay = Get-Content -LiteralPath $overlayPath -Raw | ConvertFrom-Json
+          $mapping = $overlay.bundle.resources."binaries/gigastt-runtime/*"
+          if ($mapping -ne "gigastt/") { throw "Tauri resource mapping is missing or wrong" }
+          $inventoryPath = Join-Path $env:GIGASTT_RUNTIME_DIR $manifest.packaging.runtimeInventoryName
+          $inventory = Get-Content -LiteralPath $inventoryPath -Raw | ConvertFrom-Json
+          if ($inventory.sourceCommit -ne $manifest.gigastt.sourceCommit) { throw "Runtime inventory source mismatch" }
+          if ($inventory.pythonProductionDependency -ne $false) { throw "Runtime inventory reports Python" }
+          $forbidden = @(Get-ChildItem -LiteralPath $env:GIGASTT_RUNTIME_DIR -Recurse -File | Where-Object {
+            $_.Extension -in @(".py", ".pyc", ".pyd") -or $_.Name -match "(?i)^python(?:3(?:\.\d+)?)?\.exe$"
+          })
+          if ($forbidden.Count -ne 0) { throw "Python file found in the staged runtime" }
+
+      - name: Upload smoke diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gigastt-v2.18.0-windows-smoke-evidence
+          path: ${{ runner.temp }}\gigastt-windows-evidence
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload native runtime spike
+        uses: actions/upload-artifact@v4
+        with:
+          name: gigastt-v2.18.0-windows-x86_64-runtime-spike
+          path: frontend/src-tauri/binaries/gigastt-runtime
+          if-no-files-found: error
+          retention-days: 14

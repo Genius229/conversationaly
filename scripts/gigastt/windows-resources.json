@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "gigastt": {
+    "version": "2.18.0",
+    "sourceRepository": "https://github.com/ekhodzitsky/gigastt.git",
+    "sourceTag": "v2.18.0",
+    "sourceCommit": "b4f7531b5e54af69e4766bb36c14cc6745e452b2"
+  },
+  "toolchain": {
+    "rust": "1.88.0",
+    "protoc": "30.2",
+    "target": "x86_64-pc-windows-msvc"
+  },
+  "build": {
+    "cargoArguments": [
+      "build",
+      "--release",
+      "--locked",
+      "--target",
+      "x86_64-pc-windows-msvc",
+      "-p",
+      "gigastt"
+    ],
+    "binaryRelativePath": "target/x86_64-pc-windows-msvc/release/gigastt.exe"
+  },
+  "fixture": {
+    "sourceRelativePath": "crates/gigastt/tests/fixtures/golos_00.wav",
+    "sha256": "500d2e88a1634ee766fec46f83cb903f3a1c276b2cedb36f11db800a1c4c14d0",
+    "description": "Public four-second Russian Golos speech fixture shipped by the pinned GigaSTT source checkout"
+  },
+  "model": {
+    "cacheKey": "gigastt-v2.18.0-rnnt-int8-windows-x64-c52665e9",
+    "mainFiles": [
+      {
+        "relativePath": "v3_rnnt_encoder_int8.onnx",
+        "sha256": "c52665e9d96c4ca3a153c063d2ee9af6c567fe2975ca50fd038b75bbf2f60e7f"
+      },
+      {
+        "relativePath": "v3_rnnt_decoder.onnx",
+        "sha256": "443c3b7bd42b453611618135d6b1e7d9467e5dd97c8a68501da4aa355750c0da"
+      },
+      {
+        "relativePath": "v3_rnnt_joint.onnx",
+        "sha256": "fd1d02f45c2ad3d6b67cc149811ad794ab4b020ed49a0a9e2790a8619d1cddd8"
+      },
+      {
+        "relativePath": "v3_vocab.txt",
+        "sha256": "a9143c30844d3c0bee3e9e927e4084774eb1b9eeaafc473b2c4521e4911a7c07"
+      }
+    ],
+    "sideFiles": [
+      {
+        "relativePath": "punct/rupunct_small_int8.onnx",
+        "url": "https://huggingface.co/ekhodzitsky/rupunct-small-onnx/resolve/main/rupunct_small_int8.onnx",
+        "sha256": "b105da023474d98aa13ba18953ae67b04b17bd0595034bc06030c17536893933"
+      },
+      {
+        "relativePath": "punct/tokenizer.json",
+        "url": "https://huggingface.co/ekhodzitsky/rupunct-small-onnx/resolve/main/tokenizer.json",
+        "sha256": "7ca617388c2092a3a84272025c52bbf3c6db0aee225c0351186295c0b5d3ddc6"
+      },
+      {
+        "relativePath": "punct/config.json",
+        "url": "https://huggingface.co/ekhodzitsky/rupunct-small-onnx/resolve/main/config.json",
+        "sha256": "6924a8cf41ec2bd3a3aa73a387ae0ccd0aed253ec7cac4d2f53c7d27440891eb"
+      },
+      {
+        "relativePath": "vad/silero_vad.onnx",
+        "url": "https://github.com/snakers4/silero-vad/raw/v5.1.2/src/silero_vad/data/silero_vad.onnx",
+        "sha256": "2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5bdd788f"
+      }
+    ]
+  },
+  "packaging": {
+    "stagingDirectory": "frontend/src-tauri/binaries/gigastt-runtime",
+    "tauriResourceDirectory": "gigastt",
+    "binaryName": "gigastt.exe",
+    "runtimeInventoryName": "runtime-inventory.json"
+  }
+}
