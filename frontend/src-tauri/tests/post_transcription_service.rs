@@ -324,29 +324,38 @@ async fn local_cancellation_cancels_known_job_and_preserves_draft() {
 #[tokio::test]
 async fn cancellation_during_submission_waits_for_job_id_then_cancels_it() {
     let fixture = Fixture::new(true).await;
-    write_control(&fixture.model_dir, "fake-job-response-delay-ms", "90");
+    write_control(&fixture.model_dir, "fake-job-response-await-release", "");
     let cancel = CancellationToken::new();
     let cancel_when_upload_arrives = cancel.clone();
     let model_dir = fixture.model_dir.clone();
     let trigger = tokio::spawn(async move {
-        tokio::time::timeout(Duration::from_secs(2), async {
-            while !model_dir.join("fake-upload-lengths").exists() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !model_dir.join("fake-job-request-arrived").exists() {
                 tokio::time::sleep(Duration::from_millis(2)).await;
             }
             cancel_when_upload_arrives.cancel();
+            write_control(&model_dir, "fake-job-response-release", "");
         })
         .await
         .unwrap();
     });
 
-    let error = fixture
-        .service()
+    let service = PostTranscriptionService::new(fixture.pool.clone(), fixture.sidecar.clone())
+        .with_limits(
+            Duration::from_millis(10),
+            Duration::from_secs(5),
+            Duration::from_secs(5),
+        );
+    let result = service
         .run(fixture.request(), decoder(), cancel, |_| {})
-        .await
-        .unwrap_err();
+        .await;
     trigger.await.unwrap();
+    let error = result.unwrap_err();
 
-    assert!(matches!(error, PostTranscriptionError::Cancelled));
+    assert!(
+        matches!(error, PostTranscriptionError::Cancelled),
+        "expected Cancelled after the submitted job id arrived, got {error:?}"
+    );
     let requests = fs::read_to_string(fixture.model_dir.join("fake-requests")).unwrap();
     let lines: Vec<&str> = requests.lines().collect();
     let submit = lines

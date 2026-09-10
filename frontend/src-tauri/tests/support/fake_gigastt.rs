@@ -128,6 +128,16 @@ fn control_text(model_dir: &Path, name: &str) -> Option<String> {
     fs::read_to_string(model_dir.join(name)).ok()
 }
 
+fn wait_for_control(model_dir: &Path, name: &str, timeout: Duration) {
+    let started = Instant::now();
+    while !model_dir.join(name).exists() {
+        if started.elapsed() >= timeout {
+            fail_fixture(model_dir, "job_response_release", io::ErrorKind::TimedOut);
+        }
+        thread::sleep(Duration::from_millis(2));
+    }
+}
+
 struct Request {
     method: String,
     target: String,
@@ -356,6 +366,23 @@ fn main() {
                     ),
                 );
                 let is_job = request.method == "POST" && request.target.starts_with("/v1/jobs?");
+                if is_job {
+                    append(
+                        &model_dir.join("fake-upload-lengths"),
+                        &request.body.len().to_string(),
+                    );
+                    append(
+                        &model_dir.join("fake-job-request-arrived"),
+                        &request.body.len().to_string(),
+                    );
+                    if model_dir.join("fake-job-response-await-release").exists() {
+                        wait_for_control(
+                            &model_dir,
+                            "fake-job-response-release",
+                            Duration::from_secs(5),
+                        );
+                    }
+                }
                 let status_delay = if request.method == "GET" && request.target == "/v1/jobs/job_1"
                 {
                     control_text(&model_dir, "fake-status-response-delay-ms")
@@ -371,10 +398,6 @@ fn main() {
                 }));
                 let ready = !never_ready && started.elapsed() >= ready_delay;
                 let (status, body) = if is_job {
-                    append(
-                        &model_dir.join("fake-upload-lengths"),
-                        &request.body.len().to_string(),
-                    );
                     let status = control_text(&model_dir, "fake-submit-http-status")
                         .and_then(|value| value.trim().parse().ok())
                         .unwrap_or(202);
