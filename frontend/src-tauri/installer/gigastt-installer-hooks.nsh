@@ -1,15 +1,32 @@
 ; Path-scoped installer readiness and transactional payload deployment.
 ; This file is included before Tauri's template constants; keep references to
 ; ${MAINBINARYNAME} inside macros so NSIS expands them only at insertion sites.
+; Capture __FILEDIR__ now: inside a macro it resolves later at the generated
+; installer.nsi invocation directory instead of this source directory.
+!define CONVERSATIONALY_INSTALLER_HOOK_DIR "${__FILEDIR__}"
 
 !macro CONVERSATIONALY_RUN_HELPER MODE PAYLOAD UNIQUE_ID
   InitPluginsDir
-  File /oname=$PLUGINSDIR\gigastt-installer-preflight.ps1 "${__FILEDIR__}\gigastt-installer-preflight.ps1"
+  File /oname=$PLUGINSDIR\gigastt-installer-preflight.ps1 "${CONVERSATIONALY_INSTALLER_HOOK_DIR}\gigastt-installer-preflight.ps1"
 
   conversationaly_${UNIQUE_ID}_retry:
     nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\gigastt-installer-preflight.ps1" -Mode ${MODE} -InstallDir "$INSTDIR" -MainBinaryName "${MAINBINARYNAME}.exe" ${PAYLOAD}'
     Pop $8
     Pop $9
+
+    ; nsExec also returns words such as "error" when the child cannot launch.
+    ; Never feed a nonnumeric value to SetErrorLevel, where it could become 0.
+    StrCmp $8 "0" conversationaly_${UNIQUE_ID}_code_valid
+    StrCmp $8 "10" conversationaly_${UNIQUE_ID}_code_valid
+    StrCmp $8 "11" conversationaly_${UNIQUE_ID}_code_valid
+    StrCmp $8 "12" conversationaly_${UNIQUE_ID}_code_valid
+    StrCmp $8 "13" conversationaly_${UNIQUE_ID}_code_valid
+    StrCpy $8 13
+    conversationaly_${UNIQUE_ID}_code_valid:
+
+    ${If} $9 == ""
+      StrCpy $9 "Installer preflight could not start. Close Conversationaly from the tray, then Retry."
+    ${EndIf}
 
     ${If} $8 != 0
       DetailPrint "$9"

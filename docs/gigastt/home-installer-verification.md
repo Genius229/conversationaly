@@ -72,3 +72,10 @@ runtime. Cooperative **application** exit must refuse an active recording and
 run existing cleanup. This is distinct from graceful GigaSTT **child** shutdown,
 which remains an open release gate (current Windows child cleanup is force/reap).
 Physical microphone/USB and 60-minute recording acceptance remain separate.
+
+The unchanged built-in Tauri updater has a separate lifecycle limitation: its
+`downloadAndInstall` path can exit the parent before NSIS runs, bypassing the
+application's normal exit event. Guarding that action during recording and
+draining jobs requires a separate updater change. The development overlay has
+no updater endpoints; this follow-up fixes external/manual EXE installation and
+the installer-side update checks, not that pre-existing in-app updater path.

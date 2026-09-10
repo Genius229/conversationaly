@@ -202,6 +202,29 @@ function Stop-AttributableSidecars(
     }
 }
 
+function Assert-DirectoryWritable([string]$Directory) {
+    $probePath = Join-Path $Directory (".conversationaly-installer-probe-" + [Guid]::NewGuid().ToString("N") + ".tmp")
+    try {
+        $probe = [IO.File]::Open(
+            $probePath,
+            [IO.FileMode]::CreateNew,
+            [IO.FileAccess]::ReadWrite,
+            [IO.FileShare]::None
+        )
+        $probe.Dispose()
+        Remove-Item -LiteralPath $probePath -Force -ErrorAction Stop
+    }
+    catch {
+        if (Test-Path -LiteralPath $probePath) {
+            Remove-Item -LiteralPath $probePath -Force -ErrorAction SilentlyContinue
+        }
+        Exit-TargetLocked (
+            "Setup cannot write to '$Directory'. Choose a writable location or fix the folder " +
+            "permissions, then Retry."
+        )
+    }
+}
+
 function Assert-TargetReady([string]$InstallRoot) {
     $handles = New-Object System.Collections.Generic.List[System.IDisposable]
     try {
@@ -233,6 +256,16 @@ function Assert-TargetReady([string]$InstallRoot) {
                     )
                 }
             }
+
+            # Moving a payload file requires write/delete rights on its parent,
+            # which opening the file itself does not prove. Probe every existing
+            # install directory without changing ACLs or leaving a file behind.
+            Assert-DirectoryWritable $InstallRoot
+            foreach ($directory in @(
+                Get-ChildItem -LiteralPath $InstallRoot -Directory -Recurse -Force
+            )) {
+                Assert-DirectoryWritable $directory.FullName
+            }
         }
 
         $parent = Split-Path -Parent $InstallRoot
@@ -240,27 +273,7 @@ function Assert-TargetReady([string]$InstallRoot) {
             Exit-Unsafe "The selected install path has no safe parent directory: $InstallRoot"
         }
         [IO.Directory]::CreateDirectory($parent) | Out-Null
-
-        $probePath = Join-Path $parent (".conversationaly-installer-probe-" + [Guid]::NewGuid().ToString("N") + ".tmp")
-        try {
-            $probe = [IO.File]::Open(
-                $probePath,
-                [IO.FileMode]::CreateNew,
-                [IO.FileAccess]::ReadWrite,
-                [IO.FileShare]::None
-            )
-            $probe.Dispose()
-            Remove-Item -LiteralPath $probePath -Force -ErrorAction Stop
-        }
-        catch {
-            if (Test-Path -LiteralPath $probePath) {
-                Remove-Item -LiteralPath $probePath -Force -ErrorAction SilentlyContinue
-            }
-            Exit-TargetLocked (
-                "Setup cannot write beside the selected install directory '$InstallRoot'. " +
-                "Choose a writable location or fix the folder permissions, then Retry."
-            )
-        }
+        Assert-DirectoryWritable $parent
     }
     finally {
         foreach ($handle in $handles) {
@@ -314,22 +327,82 @@ function Deploy-PayloadTransactionally(
             Get-ChildItem -LiteralPath $stageRoot -File -Recurse -Force |
                 Sort-Object FullName
         )
+        $payloadPathSet = @{}
+        foreach ($file in $payloadFiles) {
+            $relative = $file.FullName.Substring($stageRoot.Length).TrimStart([char[]]@(92, 47))
+            $payloadPathSet[$relative] = $true
+        }
 
         [IO.Directory]::CreateDirectory($InstallRoot) | Out-Null
         [IO.Directory]::CreateDirectory($backupRoot) | Out-Null
 
-        # Move every colliding old payload file away before publishing any new
-        # one. A failure here rolls all earlier moves back.
+        $filesToBackup = New-Object System.Collections.Generic.List[string]
         foreach ($file in $payloadFiles) {
             $relative = $file.FullName.Substring($stageRoot.Length).TrimStart([char[]]@(92, 47))
             $target = Join-Path $InstallRoot $relative
             if (Test-Path -LiteralPath $target -PathType Leaf) {
-                $backup = Join-Path $backupRoot $relative
-                [IO.Directory]::CreateDirectory((Split-Path -Parent $backup)) | Out-Null
-                [IO.File]::Move($target, $backup)
-                $movedOld.Add($relative)
+                $filesToBackup.Add($relative)
             }
         }
+
+        # Only the old signed build inventory proves which pre-existing runtime
+        # paths are installer-owned. Unknown files under gigastt are preserved;
+        # downloaded models and recordings are never part of this inventory.
+        $managedRuntimeRoot = Join-Path $InstallRoot "gigastt"
+        $oldInventoryPath = Join-Path $managedRuntimeRoot "runtime-inventory.json"
+        if (Test-Path -LiteralPath $oldInventoryPath -PathType Leaf) {
+            try {
+                $oldInventory = Get-Content -LiteralPath $oldInventoryPath -Raw -ErrorAction Stop |
+                    ConvertFrom-Json -ErrorAction Stop
+                $oldPackagedFiles = @($oldInventory.packagedFiles)
+            }
+            catch {
+                Exit-Unsafe (
+                    "The installed GigaSTT runtime inventory is invalid. Setup preserved every " +
+                    "runtime file: $($_.Exception.Message)"
+                )
+            }
+
+            foreach ($oldFile in $oldPackagedFiles) {
+                $oldName = [string]$oldFile.name
+                if (
+                    [string]::IsNullOrWhiteSpace($oldName) -or
+                    [IO.Path]::IsPathRooted($oldName) -or
+                    [IO.Path]::GetFileName($oldName) -ne $oldName -or
+                    $oldName.Contains("\") -or
+                    $oldName.Contains("/") -or
+                    $oldName -eq "." -or
+                    $oldName -eq ".."
+                ) {
+                    Exit-Unsafe (
+                        "The installed GigaSTT runtime inventory contains an unsafe file name. " +
+                        "Setup preserved every runtime file."
+                    )
+                }
+
+                $relative = Join-Path "gigastt" $oldName
+                $target = Join-Path $InstallRoot $relative
+                if (
+                    -not $payloadPathSet.ContainsKey($relative) -and
+                    (Test-Path -LiteralPath $target -PathType Leaf)
+                ) {
+                    $filesToBackup.Add($relative)
+                }
+            }
+        }
+
+        # Move every colliding or obsolete installer-owned file away before
+        # publishing any new one. A failure rolls all earlier moves back.
+        foreach ($relative in $filesToBackup) {
+            $target = Join-Path $InstallRoot $relative
+            $backup = Join-Path $backupRoot $relative
+            [IO.Directory]::CreateDirectory((Split-Path -Parent $backup)) | Out-Null
+            [IO.File]::Move($target, $backup)
+            $movedOld.Add($relative)
+        }
+
+        # Obsolete empty directories are harmless and deliberately retained
+        # rather than broad-deleting an installer-owned tree.
 
         # Publish the complete staged payload. Any failure removes published
         # new files and restores every old file from the backup tree.

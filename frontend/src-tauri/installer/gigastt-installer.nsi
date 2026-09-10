@@ -239,24 +239,20 @@ Function PageReinstall
   ; Reinstalling the same version
   ${If} $R0 = 0
     StrCpy $R1 "$(alreadyInstalledLong)"
-    StrCpy $R2 "$(addOrReinstall)"
-    StrCpy $R3 "$(uninstallApp)"
+    StrCpy $R2 "Reinstall in place"
+    StrCpy $R3 "Cancel setup"
     !insertmacro MUI_HEADER_TEXT "$(alreadyInstalled)" "$(chooseMaintenanceOption)"
   ; Upgrading
   ${ElseIf} $R0 = 1
     StrCpy $R1 "$(olderOrUnknownVersionInstalled)"
-    StrCpy $R2 "$(uninstallBeforeInstalling)"
-    StrCpy $R3 "$(dontUninstall)"
+    StrCpy $R2 "Update in place"
+    StrCpy $R3 "Cancel setup"
     !insertmacro MUI_HEADER_TEXT "$(alreadyInstalled)" "$(choowHowToInstall)"
   ; Downgrading
   ${ElseIf} $R0 = -1
     StrCpy $R1 "$(newerVersionInstalled)"
-    StrCpy $R2 "$(uninstallBeforeInstalling)"
-    !if "${ALLOWDOWNGRADES}" == "true"
-      StrCpy $R3 "$(dontUninstall)"
-    !else
-      StrCpy $R3 "$(dontUninstallDowngrade)"
-    !endif
+    StrCpy $R2 "Install this older version in place"
+    StrCpy $R3 "Cancel setup"
     !insertmacro MUI_HEADER_TEXT "$(alreadyInstalled)" "$(choowHowToInstall)"
   ${Else}
     Abort
@@ -284,10 +280,6 @@ Function PageReinstall
 
     ${NSD_CreateRadioButton} 30u 70u -30u 8u $R3
     Pop $R3
-    ; Disable this radio button if downgrading and downgrades are disabled
-    !if "${ALLOWDOWNGRADES}" == "false"
-      ${IfThen} $R0 = -1 ${|} EnableWindow $R3 0 ${|}
-    !endif
     ${NSD_OnClick} $R3 PageReinstallUpdateSelection
 
     ; Check the first radio button if this the first time
@@ -313,6 +305,18 @@ Function PageReinstallUpdateSelection
 FunctionEnd
 Function PageLeaveReinstall
   ${NSD_GetState} $R2 $R1
+
+  ; The maintenance page offers one truthful install action and Cancel. Silent
+  ; and passive invocations have no interactive selection and always continue
+  ; to the same bounded readiness gate.
+  ${IfNot} ${Silent}
+    ${If} $PassiveMode <> 1
+      ${If} $R1 != ${BST_CHECKED}
+        SetErrorLevel 1
+        Quit
+      ${EndIf}
+    ${EndIf}
+  ${EndIf}
 
   ; CONVERSATIONALY PATCH START: never invoke an old uninstaller's
   ; basename-scoped process killer. NSIS installs are safely updated in place
@@ -620,6 +624,10 @@ Section Install
     File /a "/oname={{this}}" "{{no-escape @key}}"
   {{/each}}
 
+  ; Generate the new uninstaller into the same private payload. The installed
+  ; uninstaller is replaced by the transaction, never by a later direct write.
+  WriteUninstaller "$PLUGINSDIR\conversationaly-payload\uninstall.exe"
+
   !insertmacro CONVERSATIONALY_DEPLOY_STAGED_PAYLOAD
   ; CONVERSATIONALY PATCH END: transactional payload deployment.
 
@@ -638,8 +646,7 @@ Section Install
     WriteRegStr SHCTX "Software\Classes\\{{protocol}}\shell\open\command" "" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\" $\"%1$\""
   {{/each}}
 
-  ; Create uninstaller
-  WriteUninstaller "$INSTDIR\uninstall.exe"
+  ; The uninstaller was included in the transaction above.
 
   ; Save $INSTDIR in registry for future installations
   WriteRegStr SHCTX "${MANUPRODUCTKEY}" "" $INSTDIR

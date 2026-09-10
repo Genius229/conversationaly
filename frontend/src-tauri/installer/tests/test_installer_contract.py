@@ -1,4 +1,7 @@
 import json
+import shutil
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -47,6 +50,22 @@ class InstallerContractTests(unittest.TestCase):
         )
         self.assertLess(preflight, template.index("Section Install"))
 
+    def test_maintenance_page_offers_only_truthful_in_place_install_or_cancel(self) -> None:
+        template = read("installer/gigastt-installer.nsi")
+        page = template.split("Function PageReinstall", 1)[1].split(
+            "FunctionEnd", 1
+        )[0]
+        leave = template.split("Function PageLeaveReinstall", 1)[1].split(
+            "FunctionEnd", 1
+        )[0]
+
+        self.assertIn("Reinstall in place", page)
+        self.assertIn("Update in place", page)
+        self.assertIn("Cancel setup", page)
+        self.assertNotIn("$(uninstallApp)", page)
+        self.assertIn("${BST_CHECKED}", leave)
+        self.assertIn("SetErrorLevel 1", leave)
+
     def test_payload_is_staged_before_transactional_deploy(self) -> None:
         template = read("installer/gigastt-installer.nsi")
         install = template.split("Section Install", 1)[1].split("SectionEnd", 1)[0]
@@ -73,6 +92,16 @@ class InstallerContractTests(unittest.TestCase):
         hooks = read("installer/gigastt-installer-hooks.nsh")
 
         self.assertIn("MB_RETRYCANCEL|MB_ICONEXCLAMATION", hooks)
+        self.assertIn(
+            '!define CONVERSATIONALY_INSTALLER_HOOK_DIR "${__FILEDIR__}"', hooks
+        )
+        self.assertIn(
+            '"${CONVERSATIONALY_INSTALLER_HOOK_DIR}\\gigastt-installer-preflight.ps1"',
+            hooks,
+        )
+        self.assertNotIn(
+            '"${__FILEDIR__}\\gigastt-installer-preflight.ps1"', hooks
+        )
         self.assertNotIn("MB_ABORTRETRYIGNORE", hooks)
         self.assertNotIn("taskkill", hooks.lower())
         self.assertNotIn("/IM", hooks)
@@ -80,6 +109,9 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("${Silent}", hooks)
         self.assertIn('"Preflight"', hooks)
         self.assertIn('"Deploy"', hooks)
+        for exit_code in ("0", "10", "11", "12", "13"):
+            self.assertIn(f'StrCmp $8 "{exit_code}"', hooks)
+        self.assertIn("StrCpy $8 13", hooks)
 
     def test_helper_declares_bounded_path_scoped_failure_contract(self) -> None:
         helper = read("installer/gigastt-installer-preflight.ps1")
@@ -91,12 +123,86 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("[StringComparison]::OrdinalIgnoreCase", helper)
         self.assertIn("[IO.FileShare]::None", helper)
         self.assertIn("[IO.FileAttributes]::ReadOnly", helper)
+        self.assertIn("Get-ChildItem -LiteralPath $InstallRoot -Directory -Recurse -Force", helper)
         self.assertIn("[IO.File]::Move", helper)
         self.assertIn("ParentProcessId", helper)
         self.assertNotIn("taskkill", helper.lower())
         self.assertNotIn("Stop-Process -Name", helper)
         self.assertNotIn("return ,@($capturedPids)", helper)
         self.assertIn("[int[]]$mainPids = @(Request-MainShutdown $mainPath)", helper)
+        self.assertIn('$managedRuntimeRoot = Join-Path $InstallRoot "gigastt"', helper)
+        self.assertIn('$oldInventoryPath = Join-Path $managedRuntimeRoot "runtime-inventory.json"', helper)
+        self.assertIn("ConvertFrom-Json", helper)
+        self.assertIn("[IO.Path]::GetFileName($oldName)", helper)
+        self.assertIn("$payloadPathSet.ContainsKey($relative)", helper)
+        self.assertNotIn(
+            "Get-ChildItem -LiteralPath $managedRuntimeRoot -File -Recurse -Force",
+            helper,
+        )
+
+    def test_deploy_removes_only_stale_old_inventory_paths(self) -> None:
+        powershell = shutil.which("pwsh") or shutil.which("powershell.exe")
+        bundled_pwsh = (
+            SRC_TAURI.parents[1] / "tools/gigastt-contract-tests/target/pwsh/pwsh"
+        )
+        if powershell is None and bundled_pwsh.is_file():
+            powershell = str(bundled_pwsh)
+        if powershell is None:
+            self.skipTest("PowerShell is unavailable")
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            install = root / "install"
+            runtime = install / "gigastt"
+            payload = root / "payload"
+            payload_runtime = payload / "gigastt"
+            runtime.mkdir(parents=True)
+            payload_runtime.mkdir(parents=True)
+
+            (install / "conversationaly.exe").write_bytes(b"old-main")
+            (runtime / "obsolete.dll").write_bytes(b"old-stale")
+            (runtime / "unknown-user-sentinel.bin").write_bytes(b"preserve-me")
+            (runtime / "runtime-inventory.json").write_text(
+                json.dumps({"packagedFiles": [{"name": "obsolete.dll"}]}),
+                encoding="utf-8",
+            )
+            (payload / "conversationaly.exe").write_bytes(b"new-main")
+            (payload_runtime / "DirectML.dll").write_bytes(b"new-dll")
+            (payload_runtime / "runtime-inventory.json").write_text(
+                json.dumps({"packagedFiles": [{"name": "DirectML.dll"}]}),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    powershell,
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(SRC_TAURI / "installer/gigastt-installer-preflight.ps1"),
+                    "-Mode",
+                    "Deploy",
+                    "-InstallDir",
+                    str(install),
+                    "-MainBinaryName",
+                    "conversationaly.exe",
+                    "-PayloadDir",
+                    str(payload),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertFalse((runtime / "obsolete.dll").exists())
+            self.assertEqual(
+                (runtime / "unknown-user-sentinel.bin").read_bytes(), b"preserve-me"
+            )
+            self.assertEqual((runtime / "DirectML.dll").read_bytes(), b"new-dll")
 
 
 if __name__ == "__main__":
