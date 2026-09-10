@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "verifiedDateUtc": "2026-09-10",
+  "repository": "Genius229/conversationaly",
+  "commit": "188d1c810f3bb13e2d8eac5fa770a172f2dca886",
+  "workflow": "GigaSTT desktop Windows check",
+  "runId": 34477334327,
+  "runUrl": "https://github.com/Genius229/conversationaly/actions/runs/34477334327",
+  "conclusion": "success",
+  "target": "x86_64-pc-windows-msvc",
+  "profile": "release-cpu-unsigned-development",
+  "productName": "Conversationaly GigaSTT Dev",
+  "identifier": "com.conversationaly.gigastt-dev",
+  "gigasttVersion": "2.18.0",
+  "gigasttSourceCommit": "b4f7531b5e54af69e4766bb36c14cc6745e452b2",
+  "runtimeArtifactId": 10152325128,
+  "smokeEvidenceArtifactId": 10152323602,
+  "installer": {
+    "artifactId": 10152866908,
+    "artifactName": "conversationaly-gigastt-windows-unsigned-dev",
+    "filename": "Conversationaly GigaSTT Dev_1.4.1_x64-setup.exe",
+    "sizeBytes": 62191188,
+    "sha256": "27e5b83e7c26aaf3b46c8688803336a768e1c6270f7e8da2f3bbe6a215771fbe"
+  },
+  "checks": {
+    "pinnedNativeBuildAndSmoke": "passed",
+    "frontendContracts": "passed",
+    "fullTauriBuild": "passed",
+    "nsisRuntimeColocationAndHashes": "passed",
+    "installerDownloadedAndHashed": "passed",
+    "chromiumCatalogMockIpc": "passed",
+    "independentFrontendReview": "approved"
+  },
+  "scope": "GigaSTT model download card in the common Settings catalog; native engine and direct Import audio behavior unchanged"
+}

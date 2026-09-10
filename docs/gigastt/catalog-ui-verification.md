@@ -2,6 +2,12 @@
 
 Approved follow-up, 2026-09-10. Baseline: `4f8896b`.
 
+Shipped source: `188d1c8`. Full Windows CI
+[34477334327](https://github.com/Genius229/conversationaly/actions/runs/34477334327)
+**PASS**, including frontend contracts, native smoke, full Tauri/NSIS build and
+installer runtime hashes. Development installer artifact: `10152866908`.
+See `evidence/windows-catalog-2026-09-10.json` for its downloaded SHA256.
+
 ## Change
 
 Settings → Transcription → On-device models now includes a **GigaSTT 2.18.0**

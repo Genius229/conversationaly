@@ -11,16 +11,20 @@ Use the `conversationaly-gigastt-windows-unsigned-dev` artifact from a successfu
 Record the run URL and commit SHA. Do not use an artifact from a failed or
 cancelled run. The build is CPU-only, with GigaSTT pinned to 2.18.0.
 
-Verified build: [run 34463264744](https://github.com/Genius229/conversationaly/actions/runs/34463264744),
-commit `119b77e`. [Download artifact 10148002744](https://github.com/Genius229/conversationaly/actions/runs/34463264744/artifacts/10148002744)
+Latest verified build (includes the Settings catalog):
+[run 34477334327](https://github.com/Genius229/conversationaly/actions/runs/34477334327),
+commit `188d1c8`. [Download artifact 10152866908](https://github.com/Genius229/conversationaly/actions/runs/34477334327/artifacts/10152866908)
 (GitHub login required; artifacts expire after 14 days).
 Installer: `Conversationaly GigaSTT Dev_1.4.1_x64-setup.exe`.
-SHA256: `4023143dae30b4f6539f12b0e91ca98658cea315a190b151499424ddc2d7a64c`.
+SHA256: `27e5b83e7c26aaf3b46c8688803336a768e1c6270f7e8da2f3bbe6a215771fbe`.
 
 The CI overlay uses `Conversationaly GigaSTT Dev` and identifier
 `com.conversationaly.gigastt-dev`: it has a separate install/data profile from
 regular Conversationaly. Models and settings must be installed/configured in
 that development profile; production data is not an acceptance fixture.
+Updating an existing GigaSTT Dev installation keeps the same application data
+profile and model directory; this catalog-only update does not require another
+model download.
 
 ## Short functional pass
 

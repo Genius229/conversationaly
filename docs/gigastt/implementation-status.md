@@ -10,7 +10,10 @@ are listed below; this is an unsigned development build, not a production releas
 Catalog usability follow-up: GigaSTT download/repair is now available directly
 in **Settings → Transcription → On-device models**, with shared meeting-panel
 state, search and Installed only. Local UI/browser checks and independent review
-passed; an updated Windows installer is pending. See `catalog-ui-verification.md`.
+passed. Updated Windows build **PASS**:
+https://github.com/Genius229/conversationaly/actions/runs/34477334327
+(`188d1c8`), installer artifact `10152866908`. Metadata-only evidence:
+`evidence/windows-catalog-2026-09-10.json`. See `catalog-ui-verification.md`.
 
 ## Implemented and locally exercised
 
@@ -171,6 +174,12 @@ is validated by CI, not by that static check). PowerShell 7.5.2 also parses
 both scripts locally without AST errors.
 
 ## Remaining approved implementation
+
+Audio-format boundary: supported MP4 audio already decodes/resamples into a
+temporary PCM16 mono 16 kHz WAV before GigaSTT processing; original audio is
+preserved. The separate **Import audio** command still uses the legacy/builtin
+transcription route. Direct imported-file → GigaSTT orchestration was not part
+of the catalog-only follow-up and must not be presented as already implemented.
 
 1. Close the graceful Windows shutdown release limitation with a
    supported/proven mechanism (native build/inference smoke already passes).
