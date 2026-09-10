@@ -1,0 +1,40 @@
+name: Audio import codec contracts
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/gigastt-post-transcription]
+    paths:
+      - 'frontend/src-tauri/src/audio/decoder.rs'
+      - 'frontend/src-tauri/src/audio/decoder/**'
+      - 'frontend/src-tauri/src/audio/import*.rs'
+      - 'frontend/src-tauri/src/audio/ffmpeg.rs'
+      - 'frontend/src-tauri/src/audio/constants.rs'
+      - 'frontend/src-tauri/Cargo.toml'
+      - 'Cargo.lock'
+      - 'tools/audio-codec-contract-tests/**'
+      - '.github/workflows/gigastt-codecs.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  real-codecs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools/audio-codec-contract-tests -> target
+      - name: Require real FFmpeg and matching production dependencies
+        run: |
+          ffmpeg -version
+          python3 tools/audio-codec-contract-tests/check-pins.py
+      - name: Decode generated Opus, ALAC, AAC and PCM with actual production code
+        run: cargo test --manifest-path tools/audio-codec-contract-tests/Cargo.toml --locked -- --test-threads=1
+      - name: Clippy
+        run: cargo clippy --manifest-path tools/audio-codec-contract-tests/Cargo.toml --locked --all-targets -- -D warnings

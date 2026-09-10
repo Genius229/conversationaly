@@ -21,8 +21,15 @@ pub fn find_ffmpeg_path() -> Option<PathBuf> {
     FFMPEG_PATH.as_ref().map(|p| p.clone())
 }
 
-fn find_ffmpeg_path_internal() -> Option<PathBuf> {
-    debug!("Starting search for ffmpeg executable");
+/// Locate an already-installed FFmpeg without downloading or changing the
+/// machine. Import decoding uses this path so opening a file never starts a
+/// runtime installation.
+pub fn find_existing_ffmpeg_path() -> Option<PathBuf> {
+    find_existing_ffmpeg_path_internal()
+}
+
+fn find_existing_ffmpeg_path_internal() -> Option<PathBuf> {
+    debug!("Searching for an existing ffmpeg executable");
 
     // ============================================================
     // PRIORITY 1: Bundled Binary (Production)
@@ -36,11 +43,6 @@ fn find_ffmpeg_path_internal() -> Option<PathBuf> {
             }
         }
     }
-
-
-    // ============================================================
-    // PRIORITY 2: Fallback to Existing Logic
-    // ============================================================
 
     // Check if `ffmpeg` is in the PATH environment variable
     if let Ok(path) = which(EXECUTABLE_NAME) {
@@ -57,7 +59,10 @@ fn find_ffmpeg_path_internal() -> Option<PathBuf> {
             debug!("Checking $HOME/.local/bin: {:?}", local_bin);
             let ffmpeg_in_local_bin = local_bin.join(EXECUTABLE_NAME);
             if ffmpeg_in_local_bin.exists() {
-                debug!("Found ffmpeg in $HOME/.local/bin: {:?}", ffmpeg_in_local_bin);
+                debug!(
+                    "Found ffmpeg in $HOME/.local/bin: {:?}",
+                    ffmpeg_in_local_bin
+                );
                 return Some(ffmpeg_in_local_bin);
             }
             debug!("ffmpeg not found in $HOME/.local/bin");
@@ -113,52 +118,57 @@ fn find_ffmpeg_path_internal() -> Option<PathBuf> {
         }
     }
 
-    debug!("ffmpeg not found. installing...");
+    // Check the ffmpeg-sidecar installation directory without invoking its
+    // installer. Windows packages may unpack into a versioned subdirectory.
+    if let Ok(installation_dir) = sidecar_dir() {
+        let installed = installation_dir.join(EXECUTABLE_NAME);
+        if installed.is_file() {
+            debug!("Found ffmpeg in sidecar directory: {:?}", installed);
+            return Some(installed);
+        }
 
-    if let Err(error) = handle_ffmpeg_installation() {
-        error!("failed to install ffmpeg: {}", error);
-        return None;
-    }
-
-    if let Ok(path) = which(EXECUTABLE_NAME) {
-        debug!("found ffmpeg after installation: {:?}", path);
-        return Some(path);
-    }
-
-    let installation_dir = sidecar_dir().map_err(|e| e.to_string()).unwrap();
-    let ffmpeg_in_installation = installation_dir.join(EXECUTABLE_NAME);
-    if ffmpeg_in_installation.is_file() {
-        debug!("found ffmpeg in directory: {:?}", ffmpeg_in_installation);
-        return Some(ffmpeg_in_installation);
-    }
-
-    // Windows often has nested structure like ffmpeg-6.0-full_build/bin/ffmpeg.exe
-    #[cfg(windows)]
-    {
-        debug!("Searching for nested ffmpeg in {:?}", installation_dir);
-        if let Ok(entries) = std::fs::read_dir(&installation_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    // Check bin/ffmpeg.exe
-                    let bin_ffmpeg = path.join("bin").join(EXECUTABLE_NAME);
-                    if bin_ffmpeg.exists() {
-                        debug!("found ffmpeg in nested bin: {:?}", bin_ffmpeg);
-                        return Some(bin_ffmpeg);
-                    }
-                    // Check root of subdir
-                    let root_ffmpeg = path.join(EXECUTABLE_NAME);
-                    if root_ffmpeg.exists() {
-                        debug!("found ffmpeg in nested root: {:?}", root_ffmpeg);
-                        return Some(root_ffmpeg);
+        #[cfg(windows)]
+        {
+            debug!("Searching for nested ffmpeg in {:?}", installation_dir);
+            if let Ok(entries) = std::fs::read_dir(&installation_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        let bin_ffmpeg = path.join("bin").join(EXECUTABLE_NAME);
+                        if bin_ffmpeg.is_file() {
+                            debug!("Found ffmpeg in nested bin: {:?}", bin_ffmpeg);
+                            return Some(bin_ffmpeg);
+                        }
+                        let root_ffmpeg = path.join(EXECUTABLE_NAME);
+                        if root_ffmpeg.is_file() {
+                            debug!("Found ffmpeg in nested root: {:?}", root_ffmpeg);
+                            return Some(root_ffmpeg);
+                        }
                     }
                 }
             }
         }
     }
 
-    error!("ffmpeg not found even after installation");
-    None // Return None if ffmpeg is not found
+    None
+}
+
+fn find_ffmpeg_path_internal() -> Option<PathBuf> {
+    if let Some(existing) = find_existing_ffmpeg_path_internal() {
+        return Some(existing);
+    }
+
+    debug!("ffmpeg not found. installing...");
+    if let Err(error) = handle_ffmpeg_installation() {
+        error!("failed to install ffmpeg: {}", error);
+        return None;
+    }
+
+    let installed = find_existing_ffmpeg_path_internal();
+    if installed.is_none() {
+        error!("ffmpeg not found even after installation");
+    }
+    installed
 }
 
 fn handle_ffmpeg_installation() -> Result<(), anyhow::Error> {

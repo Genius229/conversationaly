@@ -1,0 +1,25 @@
+[package]
+name = "audio-codec-contract-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+anyhow = "1.0"
+log = "0.4"
+once_cell = "1.17.1"
+which = "8.0"
+tempfile = "3.3.0"
+serde = { version = "1", features = ["derive"] }
+# Same registry features and lockfile versions as the desktop, deliberately
+# WITHOUT ALAC or Opus: the real FFmpeg fallback must handle those codecs.
+symphonia = { version = "=0.6.0", features = ["aac", "isomp4", "mp3", "flac", "ogg", "vorbis", "pcm", "wav", "opt-simd"] }
+ffmpeg-sidecar = { git = "https://github.com/nathanbabcock/ffmpeg-sidecar", branch = "main" }
+
+[dev-dependencies]
+sha2 = "0.10"

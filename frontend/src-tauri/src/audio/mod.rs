@@ -61,6 +61,7 @@ pub mod post_transcription;
 
 // Import module (import external audio files as new meetings)
 pub mod import;
+pub(crate) mod import_validation;
 
 pub use devices::{
     default_input_device, default_output_device, get_device_and_config, list_audio_devices,

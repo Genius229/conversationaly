@@ -16,6 +16,7 @@ on:
       - 'frontend/src-tauri/Cargo.toml'
       - 'frontend/src-tauri/installer/**'
       - 'tools/windows-installer-tests/**'
+      - 'tools/audio-codec-contract-tests/**'
       - 'Cargo.lock'
 
 permissions:
@@ -85,6 +86,20 @@ jobs:
       - name: Check portable ggml instruction floor
         shell: pwsh
         run: ./scripts/assert-no-avx512.ps1
+      - name: Verify real import codecs with the bundled Windows FFmpeg
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python tools/audio-codec-contract-tests/check-pins.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $ffmpeg = (Resolve-Path 'frontend/src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe').Path
+          $toolDir = Join-Path $env:RUNNER_TEMP 'codec-ffmpeg'
+          New-Item -ItemType Directory -Path $toolDir -Force | Out-Null
+          $env:CODEC_EXPECTED_FFMPEG = Join-Path $toolDir 'ffmpeg.exe'
+          Copy-Item -LiteralPath $ffmpeg -Destination $env:CODEC_EXPECTED_FFMPEG
+          $env:PATH = "$toolDir;$env:PATH"
+          cargo test --manifest-path tools/audio-codec-contract-tests/Cargo.toml --locked -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify installer contains the pinned runtime and DLLs together
         shell: pwsh
         run: |
