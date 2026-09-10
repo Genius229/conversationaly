@@ -1,6 +1,6 @@
 # GigaSTT integration — verification ledger
 
-Updated: 2026-09-10. Branch: `feat/gigastt-post-transcription`.
+Updated: 2026-09-11. Branch: `feat/gigastt-post-transcription`.
 
 **Automated integration gates passed:** full Windows Tauri/NSIS build, pinned
 GigaSTT native inference smoke, Windows/Ubuntu contract matrix, Clippy and
@@ -22,6 +22,31 @@ Windows app/installer run **34490125378 PASS** (`b094433`), contract matrix
 **34490124748 PASS** (Ubuntu 112, Windows 106, plus 20 Windows stress repetitions).
 Installer artifact: **10158154233**. See `import-onboarding-verification.md` and
 `evidence/windows-import-onboarding-2026-09-10.json`.
+
+Home/installer follow-up: the idle transcription header now distinguishes
+GigaSTT final transcription from optional live drafts, including all four mode
+combinations and neutral settings-loading/error states. The Windows installer
+uses path-scoped preflight and staged rollback-capable deployment rather than
+basename process killing or invoking an old NSIS uninstaller. UI, installer and
+acceptance-harness source reviews approved. Full Windows native/desktop/installer
+run **34509871655 PASS** (`89f7dee`): all nine real Windows installation/update
+cases passed. Independent repackage run **34509896297** passed the same gate.
+Latest full-build artifact **10166087006**;
+see `home-installer-verification.md` and
+`evidence/windows-home-installer-2026-09-10.json`.
+Final contract run **34511697640 PASS** (`7ae8921`): Ubuntu 115 / Windows 109
+Rust tests, eight installer tests per OS, 60 Windows exact regression repeats,
+Clippy on both. Follow-up commits from `89f7dee` through `7ae8921` were test/CI-only.
+
+Import codec follow-up **PASS**: `6e3f417` adds a one-shot local FFmpeg fallback
+for unsupported/failed native decoding, shared by validation and preparation.
+Full Windows run **34536182311** passed ten codec tests using its bundled FFmpeg
+(including real OGG/Opus and M4A/ALAC), native inference smoke and all nine
+installer cases. Latest artifact **10176121731**. Linux codec run
+**34536327944 PASS**, local existing GigaSTT regressions **115 PASS**.
+Source recordings, normalization, recognition models and preferences are
+unchanged. See `import-codec-verification.md` and
+`evidence/windows-import-codecs-2026-09-11.json`.
 
 ## Implemented and locally exercised
 
@@ -195,6 +220,10 @@ The older `188d1c8` catalog-only installer still uses the old Import audio path.
 3. Execute real Windows microphone/USB persistence, 60+ minute bounded-memory
    recording, responsive UI, restart/cancel/retry and summary ordering acceptance.
    Keep upstream recording durability intact. Checklist: `windows-acceptance.md`.
+4. Separately guard the pre-existing built-in Tauri updater's install action
+   during recording and drain application jobs before its unconditional parent
+   exit. Manual/external installer preflight does not fix that earlier in-app
+   lifecycle bypass; development updater endpoints remain disabled.
 
 ## Explicit local trust boundary
 

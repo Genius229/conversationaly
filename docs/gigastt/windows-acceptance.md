@@ -7,24 +7,34 @@ prove microphone behavior or recording durability.
 ## Build under test
 
 Use the `conversationaly-gigastt-windows-unsigned-dev` artifact from a successful
-`GigaSTT desktop Windows check` run on `feat/gigastt-post-transcription`.
+`GigaSTT desktop Windows check` or `GigaSTT installer repackage and acceptance`
+run on `feat/gigastt-post-transcription`.
 Record the run URL and commit SHA. Do not use an artifact from a failed or
 cancelled run. The build is CPU-only, with GigaSTT pinned to 2.18.0.
 
-Latest verified build (catalog, direct GigaSTT import and optional first-run setup):
-[run 34490125378](https://github.com/Genius229/conversationaly/actions/runs/34490125378),
-commit `b094433`. [Download artifact 10158154233](https://github.com/Genius229/conversationaly/actions/runs/34490125378/artifacts/10158154233)
+Latest verified installer (OGG/Opus and M4A codec fallback, retaining Home/installer fixes):
+[run 34536182311](https://github.com/Genius229/conversationaly/actions/runs/34536182311),
+full native/desktop build and installer commit `6e3f417`.
+[Download artifact 10176121731](https://github.com/Genius229/conversationaly/actions/runs/34536182311/artifacts/10176121731)
 (GitHub login required; artifacts expire after 14 days).
 Installer: `Conversationaly GigaSTT Dev_1.4.1_x64-setup.exe`.
-SHA256: `033f1c9740e0172dc4d8bcdfa7113db911cc2147c845086ce10de46caeecc6f1`.
+SHA256: `c82b2731373d3c8ab0a46d553a3d2ed126b9b9377162522fe7d36ef5629ff0f6`.
+All nine real installation/upgrade cases and ten codec tests passed. See
+`import-codec-verification.md` and `home-installer-verification.md` for evidence
+and remaining gates.
 
 The CI overlay uses `Conversationaly GigaSTT Dev` and identifier
 `com.conversationaly.gigastt-dev`: it has a separate install/data profile from
 regular Conversationaly. Models and settings must be installed/configured in
 that development profile; production data is not an acceptance fixture.
 Updating an existing GigaSTT Dev installation keeps the same application data
-profile and model directory; this catalog-only update does not require another
+profile and model directory; this update does not require another
 model download.
+
+Before updating an older build, choose **Quit** from its tray menu: closing the
+window only hides it. New builds support an exact-path cooperative installer
+quit request; an active recording refuses it. Older builds that ignore the
+request receive one Retry/Cancel prompt instead of per-DLL Ignore dialogs.
 
 ## Short functional pass
 
@@ -55,6 +65,9 @@ model download.
       model should be required. Cancel is available after staging opens the
       meeting page; application exit during staging must not leave a writer
       racing database shutdown.
+- [ ] Import the previously failing Telegram OGG/Opus and M4A files. Verify
+      validation completes, final text appears, and the original files remain
+      unchanged. A retained failed meeting can be retried after updating.
 - [ ] Force a failed job (for example by closing the app while it runs), restart,
       and confirm interrupted status with retry instead of a permanent spinner.
 - [ ] Confirm automatic summary waits for the final rows and, if enabled, speaker

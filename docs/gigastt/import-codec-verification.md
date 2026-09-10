@@ -25,6 +25,9 @@ decoder consumers; GigaSTT's existing preparation converts to mono/16 kHz.
 RAII deletes the temporary WAV on normal success/error unwinding. FFmpeg is
 looked up locally without invoking its installer; codec fallback does not start
 a download. FFmpeg stderr/metadata are not copied into application logs.
+FFmpeg input protocols are restricted to local files, so an imported playlist
+cannot fetch HTTP/network segments. Invalid oversized frame-count metadata
+disables only optional progress estimation instead of overflowing.
 
 ## Executable checks
 
@@ -52,4 +55,15 @@ ALAC is a representative unsupported M4A codec, not a claim about the original
 user file. The full Windows build runs this suite with its actual bundled FFmpeg
 before publishing the installer, in addition to the nine installation tests.
 
-Local real-media and codec checks: PASS. Updated Windows build: pending.
+Local real-media and codec checks: 10/10 PASS; Clippy PASS. Existing GigaSTT
+headless regressions: 115/115 PASS. Linux codec CI
+[34536327944](https://github.com/Genius229/conversationaly/actions/runs/34536327944)
+passed with actual FFmpeg. Full Windows build
+[34536182311](https://github.com/Genius229/conversationaly/actions/runs/34536182311)
+**PASS**: 10 codec tests against the bundled Windows FFmpeg, native inference
+smoke, desktop/NSIS build, frontend contracts and all nine installer cases.
+
+[Download artifact 10176121731](https://github.com/Genius229/conversationaly/actions/runs/34536182311/artifacts/10176121731)
+contains the updated Windows installer (`6e3f417`). SHA256:
+`c82b2731373d3c8ab0a46d553a3d2ed126b9b9377162522fe7d36ef5629ff0f6`.
+Metadata-only evidence: `evidence/windows-import-codecs-2026-09-11.json`.
