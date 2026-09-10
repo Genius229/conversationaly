@@ -43,17 +43,17 @@ function Stop-Owned([Diagnostics.Process]$Process) {
     }
 }
 
-function Invoke-Installer([string]$Case) {
+function Invoke-Installer([string]$Case, [string]$Mode = '/S') {
     $info = [Diagnostics.ProcessStartInfo]::new($Installer)
     $info.UseShellExecute = $false
     # NSIS requires /D last, unquoted even with spaces. ArgumentList would quote
     # the full /D token and NSIS would silently choose the default location.
-    $info.Arguments = "/S /D=$install"
+    $info.Arguments = "$Mode /D=$install"
     $timer = [Diagnostics.Stopwatch]::StartNew()
     $process = [Diagnostics.Process]::Start($info)
     $owned.Add($process)
     $finished = $process.WaitForExit($TimeoutSeconds * 1000)
-    $entry = [ordered]@{ case = $Case; seconds = [Math]::Round($timer.Elapsed.TotalSeconds, 2); timedOut = -not $finished; exitCode = $null }
+    $entry = [ordered]@{ case = $Case; mode = $Mode; seconds = [Math]::Round($timer.Elapsed.TotalSeconds, 2); timedOut = -not $finished; exitCode = $null }
     if ($finished) { $entry.exitCode = $process.ExitCode }
     $results.Add($entry)
     Save-Evidence
@@ -72,6 +72,7 @@ function Assert-Alive([Diagnostics.Process]$Process, [string]$Description) {
 function Start-Fixture([string]$Name, [string]$LockPath = '') {
     $path = Join-Path $fixtures $Name
     $ready = Join-Path $fixtures ($Name + '.ready')
+    Remove-Item -LiteralPath $ready -Force -ErrorAction SilentlyContinue
     $arguments = @($ready)
     if ($LockPath) { $arguments += $LockPath }
     $process = Start-Owned $path $arguments
@@ -110,6 +111,11 @@ function Assert-Runtime {
     }
     foreach ($required in @('gigastt.exe', 'DirectML.dll', 'MSVCP140.dll', 'MSVCP140_1.dll', 'VCRUNTIME140.dll', 'VCRUNTIME140_1.dll')) {
         if (-not $names.ContainsKey($required)) { throw "Inventory omits $required" }
+    }
+    $installedBinaries = @(Get-ChildItem -LiteralPath (Join-Path $install 'gigastt') -File | Where-Object { $_.Extension -in @('.exe', '.dll') })
+    if ($installedBinaries.Count -ne $names.Count) { throw 'Installed runtime contains uninventoried or stale binaries' }
+    foreach ($binary in $installedBinaries) {
+        if (-not $names.ContainsKey($binary.Name)) { throw "Runtime binary not covered by inventory: $($binary.Name)" }
     }
 }
 
@@ -158,6 +164,26 @@ try {
     if ($code -ne 12) { throw "Locked upgrade must fail preflight with code 12, got $code" }
     if (($before | ConvertTo-Json -Compress) -cne ($after | ConvertTo-Json -Compress)) { throw 'Blocked update removed or changed installed files' }
 
+    # Tauri updater defaults to passive, not silent. Also cover /P WITHOUT
+    # /UPDATE: it traverses the maintenance/old-uninstaller path in stock NSIS.
+    # None may display a Retry/Ignore dialog or remove the existing payload.
+    foreach ($mode in @('/S /R /UPDATE', '/P /R /UPDATE', '/P')) {
+        $case = 'locked-' + $mode.Replace('/', '').Replace(' ', '-')
+        if ((Invoke-Installer $case $mode) -ne 12) { throw "Locked updater failed its preflight contract: $mode" }
+        Assert-Alive $holder 'GigaSTT file holder'
+        Assert-Alive $unrelated 'Conversationaly process'
+        $current = Get-Snapshot
+        if (($before | ConvertTo-Json -Compress) -cne ($current | ConvertTo-Json -Compress)) { throw "Blocked updater changed payload: $mode" }
+        if ([IO.File]::ReadAllText($sentinel) -cne 'keep-model-data') { throw "Blocked updater changed model data: $mode" }
+    }
+
+    Stop-Owned $holder
+    $holder = Start-Fixture 'gigastt.exe' (Join-Path $install 'gigastt\VCRUNTIME140.dll')
+    if ((Invoke-Installer 'locked-msvc-upgrade') -ne 12) { throw 'Locked MSVC runtime must fail preflight with code 12' }
+    Assert-Alive $holder 'MSVC file holder'
+    Assert-Alive $unrelated 'Conversationaly process'
+    $afterMsvc = Get-Snapshot
+    if (($before | ConvertTo-Json -Compress) -cne ($afterMsvc | ConvertTo-Json -Compress)) { throw 'Blocked MSVC update changed payload' }
     Stop-Owned $holder
     if ((Invoke-Installer 'retry-after-unlock') -ne 0) { throw 'Upgrade after releasing DLL lock failed' }
     Assert-Alive $unrelated 'Conversationaly process'
@@ -165,6 +191,19 @@ try {
     if ((Get-FileHash -LiteralPath $main -Algorithm SHA256).Hash -ne $mainHash) { throw 'Successful upgrade did not restore the main payload' }
     if ([IO.File]::ReadAllText($sentinel) -cne 'keep-model-data') { throw 'Update changed application model data' }
     Stop-Owned $unrelated
+
+    $readOnlyFile = Join-Path $install 'gigastt\MSVCP140.dll'
+    $originalAttributes = [IO.File]::GetAttributes($readOnlyFile)
+    try {
+        [IO.File]::SetAttributes($readOnlyFile, $originalAttributes -bor [IO.FileAttributes]::ReadOnly)
+        $beforeReadOnly = Get-Snapshot
+        if ((Invoke-Installer 'read-only-destination') -ne 12) { throw 'Read-only destination must fail with code 12' }
+        $afterReadOnly = Get-Snapshot
+        if (($beforeReadOnly | ConvertTo-Json -Compress) -cne ($afterReadOnly | ConvertTo-Json -Compress)) { throw 'Read-only failure changed installed files' }
+        if (-not ([IO.File]::GetAttributes($readOnlyFile) -band [IO.FileAttributes]::ReadOnly)) { throw 'Installer silently changed destination attributes' }
+    } finally {
+        [IO.File]::SetAttributes($readOnlyFile, $originalAttributes)
+    }
 
     if ($TestCooperativeQuit) {
         $app = Start-Owned $main @()
@@ -174,6 +213,7 @@ try {
         if (-not $app.WaitForExit(10000)) { throw 'Installed application did not cooperate with installer quit' }
         Assert-Runtime
     }
+    if ([IO.File]::ReadAllText($sentinel) -cne 'keep-model-data') { throw 'Installation tests changed model data' }
     $results.Add([ordered]@{ case = 'all-assertions'; passed = $true })
     Write-Host 'WINDOWS INSTALLER ACCEPTANCE PASS'
 } catch {

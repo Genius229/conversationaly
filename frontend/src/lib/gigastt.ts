@@ -3,6 +3,150 @@ export interface GigasttSettings {
   live_preview: boolean;
 }
 
+export type GigasttSettingsLoadState =
+  | { status: 'loading' }
+  | { status: 'ready'; settings: GigasttSettings }
+  | { status: 'error' };
+
+export interface HomeTranscriptionPresentation {
+  primaryLabel: string;
+  secondaryLabel: string | null;
+  ariaLabel: string;
+  description: string;
+  idleDescription: string;
+  activeLabel: string;
+  activeDescription: string;
+  pausedDescription: string;
+  showLiveActivity: boolean;
+  showLocalIcon: boolean;
+}
+
+export interface GigasttSettingsChannel {
+  subscribe(listener: (settings: GigasttSettings) => void): () => void;
+  publish(settings: GigasttSettings): void;
+}
+
+/**
+ * Keeps frontend consumers in sync after a successful settings save without
+ * adding a native event to the persistence contract.
+ */
+export function createGigasttSettingsChannel(): GigasttSettingsChannel {
+  const listeners = new Set<(settings: GigasttSettings) => void>();
+
+  return {
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    publish(settings) {
+      listeners.forEach(listener => listener(settings));
+    },
+  };
+}
+
+/**
+ * Maps persisted GigaSTT settings to copy for the home capture surface. The
+ * selected legacy provider is named only when it is actually supplying the
+ * optional live draft.
+ */
+export function homeTranscriptionPresentation(
+  state: GigasttSettingsLoadState,
+  liveModelLabel: string,
+  liveModelIsLocal: boolean = true,
+): HomeTranscriptionPresentation {
+  if (state.status === 'loading') {
+    return {
+      primaryLabel: 'Loading transcription settings…',
+      secondaryLabel: null,
+      ariaLabel: 'Loading transcription settings.',
+      description: 'Checking how this recording will be transcribed.',
+      idleDescription: 'Start a recording to save audio. Transcription follows your saved settings.',
+      activeLabel: 'Recording',
+      activeDescription: 'Audio is being saved. Transcription follows your saved settings.',
+      pausedDescription: 'Resume from the transport below to keep recording audio.',
+      showLiveActivity: false,
+      showLocalIcon: false,
+    };
+  }
+
+  if (state.status === 'error') {
+    return {
+      primaryLabel: 'Transcription settings unavailable',
+      secondaryLabel: null,
+      ariaLabel: 'Transcription settings unavailable.',
+      description: 'Recording still saves audio, but the transcription mode could not be verified.',
+      idleDescription: 'Start a recording to save audio. Transcription settings could not be verified.',
+      activeLabel: 'Recording',
+      activeDescription: 'Audio is being saved. Transcription settings could not be verified.',
+      pausedDescription: 'Resume from the transport below to keep recording audio.',
+      showLiveActivity: false,
+      showLocalIcon: false,
+    };
+  }
+
+  const { auto_transcribe: autoTranscribe, live_preview: livePreview } = state.settings;
+  const model = liveModelLabel.trim() || 'Live model';
+  const liveLabel = `${model} · Live draft`;
+
+  if (autoTranscribe && livePreview) {
+    return {
+      primaryLabel: 'GigaSTT · After recording',
+      secondaryLabel: liveLabel,
+      ariaLabel: `Automatic final transcript: GigaSTT after recording. Live draft: ${model}.`,
+      description: `GigaSTT creates the final transcript after recording. ${model} provides the live draft.`,
+      idleDescription: 'Start a recording. A live draft appears here, then GigaSTT creates the final transcript after recording.',
+      activeLabel: 'Listening for a live draft',
+      activeDescription: 'Speech appears here as a draft a few seconds after it is spoken.',
+      pausedDescription: 'Resume from the transport below to keep capturing the live draft.',
+      showLiveActivity: true,
+      showLocalIcon: true,
+    };
+  }
+
+  if (autoTranscribe) {
+    return {
+      primaryLabel: 'GigaSTT · After recording',
+      secondaryLabel: null,
+      ariaLabel: 'Automatic final transcript: GigaSTT after recording.',
+      description: 'GigaSTT creates the final transcript on this machine after recording.',
+      idleDescription: 'Start a recording. GigaSTT creates the final transcript after recording ends.',
+      activeLabel: 'Recording',
+      activeDescription: 'Audio is being saved. The final transcript appears after you stop recording.',
+      pausedDescription: 'Resume from the transport below to keep recording audio.',
+      showLiveActivity: false,
+      showLocalIcon: true,
+    };
+  }
+
+  if (livePreview) {
+    return {
+      primaryLabel: liveLabel,
+      secondaryLabel: 'GigaSTT · Manual final',
+      ariaLabel: `Live draft: ${model}. Automatic final transcription is off; GigaSTT is available manually.`,
+      description: `${model} provides the live draft. Run GigaSTT from the saved meeting when you want a final transcript.`,
+      idleDescription: 'Start a recording to see a live draft. Run GigaSTT from the saved meeting when you want a final transcript.',
+      activeLabel: 'Listening for a live draft',
+      activeDescription: 'Speech appears here as a draft a few seconds after it is spoken.',
+      pausedDescription: 'Resume from the transport below to keep capturing the live draft.',
+      showLiveActivity: true,
+      showLocalIcon: liveModelIsLocal,
+    };
+  }
+
+  return {
+    primaryLabel: 'Audio only',
+    secondaryLabel: 'GigaSTT · Manual final',
+    ariaLabel: 'Automatic transcription is off. Audio only; GigaSTT is available manually.',
+    description: 'Audio is saved without automatic transcription. Run GigaSTT from the saved meeting when you want a transcript.',
+    idleDescription: 'Start a recording to save audio. Run GigaSTT from the saved meeting when you want a transcript.',
+    activeLabel: 'Recording',
+    activeDescription: 'Audio is being saved without automatic transcription.',
+    pausedDescription: 'Resume from the transport below to keep recording audio.',
+    showLiveActivity: false,
+    showLocalIcon: false,
+  };
+}
+
 export type GigasttJobState =
   | 'preparing_audio'
   | 'starting'

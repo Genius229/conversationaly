@@ -4,9 +4,11 @@ const {
   canAutomaticallyPostProcess,
   canAutomaticallyGenerateSummary,
   canSummarizeCurrentDraft,
+  createGigasttSettingsChannel,
   createGigasttModelInstallAuthority,
   gigasttCatalogMatches,
   gigasttCatalogView,
+  homeTranscriptionPresentation,
   isGigasttJobActive,
   isGigasttModelReady,
   recordingSaveDescription,
@@ -40,6 +42,130 @@ test('live model is bypassed only when loaded settings explicitly disable previe
   assert.equal(requiresLiveTranscriptionModel({ auto_transcribe: true, live_preview: false }), false);
   assert.equal(requiresLiveTranscriptionModel({ auto_transcribe: true, live_preview: true }), true);
   assert.equal(requiresLiveTranscriptionModel(null), true);
+});
+
+test('home transcription presentation describes every persisted settings combination honestly', () => {
+  assert.deepEqual(
+    homeTranscriptionPresentation(
+      { status: 'ready', settings: { auto_transcribe: true, live_preview: false } },
+      'parakeet-tdt-0.6b-v3',
+    ),
+    {
+      primaryLabel: 'GigaSTT · After recording',
+      secondaryLabel: null,
+      ariaLabel: 'Automatic final transcript: GigaSTT after recording.',
+      description: 'GigaSTT creates the final transcript on this machine after recording.',
+      idleDescription: 'Start a recording. GigaSTT creates the final transcript after recording ends.',
+      activeLabel: 'Recording',
+      activeDescription: 'Audio is being saved. The final transcript appears after you stop recording.',
+      pausedDescription: 'Resume from the transport below to keep recording audio.',
+      showLiveActivity: false,
+      showLocalIcon: true,
+    },
+  );
+
+  assert.deepEqual(
+    homeTranscriptionPresentation(
+      { status: 'ready', settings: { auto_transcribe: true, live_preview: true } },
+      'parakeet-tdt-0.6b-v3',
+    ),
+    {
+      primaryLabel: 'GigaSTT · After recording',
+      secondaryLabel: 'parakeet-tdt-0.6b-v3 · Live draft',
+      ariaLabel: 'Automatic final transcript: GigaSTT after recording. Live draft: parakeet-tdt-0.6b-v3.',
+      description: 'GigaSTT creates the final transcript after recording. parakeet-tdt-0.6b-v3 provides the live draft.',
+      idleDescription: 'Start a recording. A live draft appears here, then GigaSTT creates the final transcript after recording.',
+      activeLabel: 'Listening for a live draft',
+      activeDescription: 'Speech appears here as a draft a few seconds after it is spoken.',
+      pausedDescription: 'Resume from the transport below to keep capturing the live draft.',
+      showLiveActivity: true,
+      showLocalIcon: true,
+    },
+  );
+
+  assert.deepEqual(
+    homeTranscriptionPresentation(
+      { status: 'ready', settings: { auto_transcribe: false, live_preview: true } },
+      'parakeet-tdt-0.6b-v3',
+    ),
+    {
+      primaryLabel: 'parakeet-tdt-0.6b-v3 · Live draft',
+      secondaryLabel: 'GigaSTT · Manual final',
+      ariaLabel: 'Live draft: parakeet-tdt-0.6b-v3. Automatic final transcription is off; GigaSTT is available manually.',
+      description: 'parakeet-tdt-0.6b-v3 provides the live draft. Run GigaSTT from the saved meeting when you want a final transcript.',
+      idleDescription: 'Start a recording to see a live draft. Run GigaSTT from the saved meeting when you want a final transcript.',
+      activeLabel: 'Listening for a live draft',
+      activeDescription: 'Speech appears here as a draft a few seconds after it is spoken.',
+      pausedDescription: 'Resume from the transport below to keep capturing the live draft.',
+      showLiveActivity: true,
+      showLocalIcon: true,
+    },
+  );
+
+  assert.deepEqual(
+    homeTranscriptionPresentation(
+      { status: 'ready', settings: { auto_transcribe: false, live_preview: false } },
+      'parakeet-tdt-0.6b-v3',
+    ),
+    {
+      primaryLabel: 'Audio only',
+      secondaryLabel: 'GigaSTT · Manual final',
+      ariaLabel: 'Automatic transcription is off. Audio only; GigaSTT is available manually.',
+      description: 'Audio is saved without automatic transcription. Run GigaSTT from the saved meeting when you want a transcript.',
+      idleDescription: 'Start a recording to save audio. Run GigaSTT from the saved meeting when you want a transcript.',
+      activeLabel: 'Recording',
+      activeDescription: 'Audio is being saved without automatic transcription.',
+      pausedDescription: 'Resume from the transport below to keep recording audio.',
+      showLiveActivity: false,
+      showLocalIcon: false,
+    },
+  );
+});
+
+test('home transcription presentation never guesses a model while settings load or fail', () => {
+  assert.deepEqual(
+    homeTranscriptionPresentation({ status: 'loading' }, 'parakeet-tdt-0.6b-v3'),
+    {
+      primaryLabel: 'Loading transcription settings…',
+      secondaryLabel: null,
+      ariaLabel: 'Loading transcription settings.',
+      description: 'Checking how this recording will be transcribed.',
+      idleDescription: 'Start a recording to save audio. Transcription follows your saved settings.',
+      activeLabel: 'Recording',
+      activeDescription: 'Audio is being saved. Transcription follows your saved settings.',
+      pausedDescription: 'Resume from the transport below to keep recording audio.',
+      showLiveActivity: false,
+      showLocalIcon: false,
+    },
+  );
+
+  assert.deepEqual(
+    homeTranscriptionPresentation({ status: 'error' }, 'parakeet-tdt-0.6b-v3'),
+    {
+      primaryLabel: 'Transcription settings unavailable',
+      secondaryLabel: null,
+      ariaLabel: 'Transcription settings unavailable.',
+      description: 'Recording still saves audio, but the transcription mode could not be verified.',
+      idleDescription: 'Start a recording to save audio. Transcription settings could not be verified.',
+      activeLabel: 'Recording',
+      activeDescription: 'Audio is being saved. Transcription settings could not be verified.',
+      pausedDescription: 'Resume from the transport below to keep recording audio.',
+      showLiveActivity: false,
+      showLocalIcon: false,
+    },
+  );
+});
+
+test('GigaSTT settings channel stops notifying listeners after cleanup', () => {
+  const channel = createGigasttSettingsChannel();
+  const received: Array<{ auto_transcribe: boolean; live_preview: boolean }> = [];
+  const unsubscribe = channel.subscribe(settings => received.push(settings));
+
+  channel.publish({ auto_transcribe: true, live_preview: false });
+  unsubscribe();
+  channel.publish({ auto_transcribe: false, live_preview: true });
+
+  assert.deepEqual(received, [{ auto_transcribe: true, live_preview: false }]);
 });
 
 test('automatic post-processing waits for a final transcript and never uses failed draft text', () => {

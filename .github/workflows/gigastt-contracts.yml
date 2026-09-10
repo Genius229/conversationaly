@@ -8,6 +8,8 @@ on:
       - 'frontend/src-tauri/src/audio/post_transcription/**'
       - 'frontend/src-tauri/src/onboarding*.rs'
       - 'frontend/src-tauri/src/lib.rs'
+      - 'frontend/src-tauri/src/installer_shutdown.rs'
+      - 'frontend/src-tauri/installer/**'
       - 'frontend/src-tauri/tests/**'
       - 'frontend/src-tauri/migrations/**'
       - 'tools/gigastt-contract-tests/**'
@@ -17,6 +19,8 @@ on:
       - 'frontend/src-tauri/src/audio/post_transcription/**'
       - 'frontend/src-tauri/src/onboarding*.rs'
       - 'frontend/src-tauri/src/lib.rs'
+      - 'frontend/src-tauri/src/installer_shutdown.rs'
+      - 'frontend/src-tauri/installer/**'
       - 'frontend/src-tauri/tests/**'
       - 'frontend/src-tauri/migrations/**'
       - 'tools/gigastt-contract-tests/**'
@@ -43,6 +47,8 @@ jobs:
           workspaces: tools/gigastt-contract-tests -> target
       - name: Test production modules against owned fake processes
         run: cargo test --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked --features gigastt-test-fixtures --no-fail-fast
+      - name: Verify pinned installer ordering and configuration contracts
+        run: python -m unittest discover -s frontend/src-tauri/installer/tests -v
       - name: Repeat Windows cancelled-probe lifecycle regression
         if: runner.os == 'Windows'
         shell: pwsh

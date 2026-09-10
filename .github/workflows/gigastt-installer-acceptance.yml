@@ -1,11 +1,6 @@
 name: GigaSTT installer acceptance
 
 on:
-  push:
-    branches: [feat/gigastt-post-transcription]
-    paths:
-      - 'tools/windows-installer-tests/**'
-      - '.github/workflows/gigastt-installer-acceptance.yml'
   workflow_dispatch:
     inputs:
       artifact_run_id:
@@ -16,6 +11,10 @@ on:
         description: 'Also test the new native cooperative quit integration'
         type: boolean
         default: false
+      artifact_name:
+        description: 'Artifact name (failed candidates are diagnostics only)'
+        required: true
+        default: 'conversationaly-gigastt-windows-unsigned-dev'
 
 permissions:
   contents: read
@@ -29,7 +28,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: conversationaly-gigastt-windows-unsigned-dev
+          name: ${{ inputs.artifact_name }}
           path: installer-artifact
           run-id: ${{ inputs.artifact_run_id || '34490125378' }}
           github-token: ${{ secrets.GITHUB_TOKEN }}

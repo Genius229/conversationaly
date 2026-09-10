@@ -8,6 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { RecordingStatusBar } from "./RecordingStatusBar";
 import { useRecordingState } from "@/contexts/RecordingStateContext";
 import { TranscriptSegmentData } from "@/types";
+import type { HomeTranscriptionPresentation } from "@/lib/gigastt";
 import { speakerLabel, SpeakerNames } from "@/lib/speaker";
 import { Loader2, Mic } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -29,6 +30,8 @@ export interface VirtualizedTranscriptViewProps {
     showConfidence?: boolean;
     /** Completely disable auto-scroll behavior (for meeting details page) */
     disableAutoScroll?: boolean;
+    /** Home capture copy derived from persisted transcription settings. */
+    emptyStateCopy?: HomeTranscriptionPresentation;
     speakerNames?: SpeakerNames;
     onRenameSpeaker?: (speaker: string, name: string) => void;
 
@@ -194,6 +197,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     partialText = '',
     showConfidence = true,
     disableAutoScroll = false,
+    emptyStateCopy,
     speakerNames,
     onRenameSpeaker,
     hasMore = false,
@@ -310,6 +314,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     // Outside the virtualizer — this text is rewritten several times a second
     // and re-measuring a virtual row on every keystroke-sized change thrashes.
     const liveTail =
+        (emptyStateCopy?.showLiveActivity ?? true) &&
         !isStopping && isRecording && !isPaused && !isProcessing ? (
             partialText ? (
                 <div className="mt-2 flex items-baseline gap-3 py-1.5 pl-[4.25rem] animate-fade-in">
@@ -362,14 +367,14 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                 {isPaused
                                     ? 'Recording paused'
                                     : captureArmed
-                                      ? 'Listening'
+                                      ? emptyStateCopy?.activeLabel ?? 'Listening'
                                       : 'Waiting for audio'}
                             </p>
                             <p className="mt-1 max-w-[34ch] text-base leading-relaxed text-ink-muted">
                                 {isPaused
-                                    ? 'Resume from the transport below to keep capturing.'
+                                    ? emptyStateCopy?.pausedDescription ?? 'Resume from the transport below to keep capturing.'
                                     : captureArmed
-                                      ? 'Speech appears here a few seconds after it is spoken.'
+                                      ? emptyStateCopy?.activeDescription ?? 'Speech appears here a few seconds after it is spoken.'
                                       : 'The microphone is open but has not sent any audio yet. Bluetooth headsets can take a second or two.'}
                             </p>
                         </>
@@ -380,8 +385,10 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                             </span>
                             <p className="text-md font-medium text-ink">No transcript yet</p>
                             <p className="mt-1 max-w-[38ch] text-base leading-relaxed text-ink-muted">
-                                Start a recording and speech is transcribed here live — on this
-                                machine, with no audio leaving it.
+                                {emptyStateCopy?.idleDescription ?? (
+                                    <>Start a recording and speech is transcribed here live — on this
+                                    machine, with no audio leaving it.</>
+                                )}
                             </p>
                         </>
                     )}

@@ -6,15 +6,23 @@ import type {
   GigasttModelDownloadState,
   GigasttSettings,
 } from '@/lib/gigastt';
+import { createGigasttSettingsChannel } from '@/lib/gigastt';
 import { gigasttImportCommandArgs } from '@/lib/import-audio';
+
+const settingsChannel = createGigasttSettingsChannel();
 
 class GigasttService {
   getSettings(): Promise<GigasttSettings> {
     return invoke<GigasttSettings>('gigastt_get_settings');
   }
 
-  saveSettings(settings: GigasttSettings): Promise<void> {
-    return invoke<void>('gigastt_save_settings', { settings });
+  async saveSettings(settings: GigasttSettings): Promise<void> {
+    await invoke<void>('gigastt_save_settings', { settings });
+    settingsChannel.publish(settings);
+  }
+
+  subscribeSettings(listener: (settings: GigasttSettings) => void): () => void {
+    return settingsChannel.subscribe(listener);
   }
 
   transcribeMeeting(meetingId: string): Promise<GigasttJobSnapshot> {

@@ -1,6 +1,12 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "bundle": {
+    "windows": {
+      "nsis": {
+        "template": "installer/gigastt-installer.nsi",
+        "installerHooks": "installer/gigastt-installer-hooks.nsh"
+      }
+    },
     "resources": {
       "templates/*.json": "templates/",
       "binaries/gigastt-runtime/*": "gigastt/"

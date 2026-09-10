@@ -9,7 +9,13 @@
       "templates/*.json": "templates/",
       "binaries/gigastt-runtime/*": "gigastt/"
     },
-    "windows": {"signCommand": null}
+    "windows": {
+      "signCommand": null,
+      "nsis": {
+        "template": "installer/gigastt-installer.nsi",
+        "installerHooks": "installer/gigastt-installer-hooks.nsh"
+      }
+    }
   },
   "plugins": {"updater": {"endpoints": []}}
 }

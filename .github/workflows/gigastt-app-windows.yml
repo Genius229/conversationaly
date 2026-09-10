@@ -10,7 +10,12 @@ on:
       - 'frontend/src/**'
       - 'frontend/tests/**'
       - 'frontend/src-tauri/tauri.gigastt*.json'
+      - 'frontend/src-tauri/tauri.conf.json'
+      - 'frontend/package.json'
+      - 'frontend/pnpm-lock.yaml'
       - 'frontend/src-tauri/Cargo.toml'
+      - 'frontend/src-tauri/installer/**'
+      - 'tools/windows-installer-tests/**'
       - 'Cargo.lock'
 
 permissions:
@@ -67,7 +72,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Test GigaSTT and onboarding frontend contracts
         working-directory: frontend
-        run: node --experimental-strip-types --test src/lib/gigastt.test.ts tests/lib/onboarding-explicit-downloads.test.mjs
+        run: node --experimental-strip-types --test src/lib/gigastt.test.ts tests/lib/onboarding-explicit-downloads.test.mjs tests/lib/home-transcription-presentation.test.mjs
       - name: Build real llama-helper sidecar (CPU)
         shell: pwsh
         run: |
@@ -98,6 +103,23 @@ jobs:
             $actual = (Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($actual -ne $file.sha256) { throw "Installer runtime mismatch: $($file.name)" }
           }
+      - name: Real Windows installation and upgrade acceptance
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem target/release/bundle/nsis/*.exe)
+          if ($installers.Count -ne 1) { throw 'Expected exactly one installer' }
+          ./tools/windows-installer-tests/acceptance.ps1 `
+            -Installer $installers[0].FullName `
+            -EvidenceDir "$env:RUNNER_TEMP\installer-acceptance-evidence" `
+            -TestCooperativeQuit
+      - name: Upload installation and upgrade diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-acceptance-evidence
+          path: ${{ runner.temp }}/installer-acceptance-evidence
+          if-no-files-found: warn
+          retention-days: 14
       - name: Upload unsigned development installer (not a production release)
         uses: actions/upload-artifact@v4
         with:
@@ -105,3 +127,11 @@ jobs:
           path: target/release/bundle/nsis/*.exe
           if-no-files-found: error
           retention-days: 14
+      - name: Retain failed candidate for installer diagnostics only
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conversationaly-gigastt-windows-failed-candidate
+          path: target/release/bundle/nsis/*.exe
+          if-no-files-found: ignore
+          retention-days: 7

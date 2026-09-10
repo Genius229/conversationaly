@@ -48,6 +48,7 @@ pub mod onboarding;
 pub mod openai;
 pub mod anthropic;
 pub mod groq;
+mod installer_shutdown;
 pub mod openrouter;
 pub mod state;
 pub mod summary;
@@ -443,6 +444,51 @@ fn log_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
     builder.build()
 }
 
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+fn handle_installer_quit_request<R: Runtime>(app: &AppHandle<R>, args: &[String]) -> bool {
+    let current_exe = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(error) => {
+            if args
+                .iter()
+                .any(|arg| arg == installer_shutdown::INSTALLER_QUIT_ARG)
+            {
+                log::warn!(
+                    "Refusing installer shutdown request: current executable is unavailable: {}",
+                    error
+                );
+                return true;
+            }
+            return false;
+        }
+    };
+
+    match installer_shutdown::installer_quit_decision(
+        args,
+        &current_exe,
+        audio::recording_commands::is_recording_now(),
+    ) {
+        installer_shutdown::InstallerQuitDecision::NotRequested => false,
+        installer_shutdown::InstallerQuitDecision::RefuseUntrustedTarget => {
+            log::warn!(
+                "Refusing installer shutdown request because its executable path proof does not match {}",
+                current_exe.display()
+            );
+            true
+        }
+        installer_shutdown::InstallerQuitDecision::RefuseActiveRecording => {
+            log::warn!("Refusing installer shutdown request while a recording is active");
+            tray::focus_main_window(app);
+            true
+        }
+        installer_shutdown::InstallerQuitDecision::Exit => {
+            log::info!("Accepted exact-path installer shutdown request");
+            app.exit(0);
+            true
+        }
+    }
+}
+
 pub fn run() {
     // Registered first: plugin setup runs in registration order, so anything
     // logged by a later plugin's setup would be lost if this came after them.
@@ -457,7 +503,9 @@ pub fn run() {
                 cwd
             );
 
-            tray::focus_main_window(app);
+            if !handle_installer_quit_request(app, &args) {
+                tray::focus_main_window(app);
+            }
         }));
     }
 
@@ -477,6 +525,23 @@ pub fn run() {
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
             log::info!("Starting application...");
+
+            // If the old instance exited in the narrow gap between the
+            // installer's path-scoped process check and its cooperative launch,
+            // this process becomes the primary instance. It still proves the
+            // exact target path, has no active recording, and must exit instead
+            // of opening a new app that would make the preflight time out.
+            #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+            {
+                let startup_args = std::env::args().collect::<Vec<_>>();
+                if handle_installer_quit_request(_app.handle(), &startup_args) {
+                    // The primary-instance race path has no work to preserve.
+                    // Untrusted installer arguments are also closed rather than
+                    // leaving a half-initialized application running.
+                    _app.handle().exit(0);
+                    return Ok(());
+                }
+            }
 
             // Before anything reads the data dirs.
             migrate::migrate_legacy_data_dirs(_app.handle());

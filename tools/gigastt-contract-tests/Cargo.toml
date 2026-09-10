@@ -8,6 +8,10 @@ publish = false
 [workspace]
 
 [[test]]
+name = "installer_shutdown"
+path = "../../frontend/src-tauri/src/installer_shutdown.rs"
+
+[[test]]
 name = "post_transcription_finalization"
 path = "../../frontend/src-tauri/tests/post_transcription_finalization.rs"
 

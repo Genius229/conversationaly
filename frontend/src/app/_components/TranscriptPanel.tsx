@@ -9,11 +9,13 @@ import { usePermissionCheck } from '@/hooks/usePermissionCheck';
 import { ModalType } from '@/hooks/useModalState';
 import { useIsLinux } from '@/hooks/usePlatform';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useGigasttSettings } from '@/hooks/useGigasttSettings';
+import { homeTranscriptionPresentation } from '@/lib/gigastt';
 import { useMemo } from 'react';
 
 /**
- * The live capture surface. Header carries the machine facts (which model is
- * decoding, that it is doing so locally) alongside the actions — see
+ * The capture surface. Header carries the machine facts (which transcription
+ * modes are active and when they run) alongside the actions — see
  * /PRODUCT.md principle 3, "make the local machine legible".
  */
 interface TranscriptPanelProps {
@@ -33,6 +35,7 @@ export function TranscriptPanel({
   const { checkPermissions, isChecking, hasSystemAudio, hasMicrophone } =
     usePermissionCheck();
   const isLinux = useIsLinux();
+  const gigasttSettings = useGigasttSettings();
 
   const segments = useMemo(
     () =>
@@ -48,32 +51,49 @@ export function TranscriptPanel({
   );
 
   const isLocal = transcriptModelConfig.provider === 'local';
+  const presentation = useMemo(
+    () => homeTranscriptionPresentation(
+      gigasttSettings,
+      transcriptModelConfig.model,
+      isLocal,
+    ),
+    [gigasttSettings, transcriptModelConfig.model, isLocal],
+  );
 
   return (
     // Not a scroll container — VirtualizedTranscriptView owns scrolling, and a
     // second one here fights the virtualizer's measurements.
     <div ref={transcriptContainerRef} className="flex min-w-0 flex-1 flex-col overflow-hidden bg-canvas">
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-line px-4">
-        {/* Which model is decoding, and where. */}
+      <header className="flex h-12 min-w-0 shrink-0 items-center gap-3 border-b border-line px-4">
+        {/* Persisted capture mode, with the optional live model kept secondary. */}
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="flex min-w-0 items-center gap-1.5 text-ink-muted">
-              {isLocal && (
+            <span
+              aria-label={presentation.ariaLabel}
+              className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-ink-muted"
+            >
+              {presentation.showLocalIcon && (
                 <HardDriveDownload className="h-3.5 w-3.5 shrink-0" aria-hidden />
               )}
-              <span className="readout truncate text-2xs">
-                {transcriptModelConfig.model || 'No model selected'}
+              <span className="readout flex min-w-0 items-center gap-1.5 overflow-hidden text-2xs">
+                <span className="truncate">{presentation.primaryLabel}</span>
+                {presentation.secondaryLabel && (
+                  <>
+                    <span className="hidden shrink-0 text-ink-faint min-[420px]:inline" aria-hidden>/</span>
+                    <span className="hidden min-w-0 truncate text-ink-faint min-[420px]:inline">
+                      {presentation.secondaryLabel}
+                    </span>
+                  </>
+                )}
               </span>
             </span>
           </TooltipTrigger>
           <TooltipContent side="bottom">
-            {isLocal
-              ? 'Transcribing on this machine — no audio leaves it'
-              : `Transcribing via ${transcriptModelConfig.provider}`}
+            {presentation.description}
           </TooltipContent>
         </Tooltip>
 
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex shrink-0 items-center gap-1">
           {isLocal && (
             <Button
               variant="ghost"
@@ -115,8 +135,9 @@ export function TranscriptPanel({
             isPaused={isPaused}
             isProcessing={isProcessingStop}
             isStopping={isStopping}
-            partialText={partialText}
+            partialText={presentation.showLiveActivity ? partialText : ''}
             showConfidence={true}
+            emptyStateCopy={presentation}
           />
         </div>
       </div>

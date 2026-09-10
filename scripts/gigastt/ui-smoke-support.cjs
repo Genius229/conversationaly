@@ -144,7 +144,7 @@ function installTauriFixture(options = {}) {
           recording_duration: 0, active_duration: 0, mic_frames: 0,
           meeting_id: null, recording_session_id: null,
         };
-        if (command === 'api_get_transcript_config') return { provider: 'local', model: 'gigaam-v3-rnnt-q8', apiKey: null };
+        if (command === 'api_get_transcript_config') return { provider: 'local', model: options.liveModel || 'gigaam-v3-rnnt-q8', apiKey: null };
         if (command === 'api_save_transcript_config') { state.providerWrites++; persist(); return null; }
         if (command === 'api_get_model_config') return { provider: 'builtin-ai', model: 'gemma4:e2b', whisperModel: 'large-v3' };
         if (command === 'get_recording_preferences') return {
@@ -164,7 +164,14 @@ function installTauriFixture(options = {}) {
             meeting_reminder_minutes: [],
           },
         };
-        if (command === 'gigastt_get_settings') return { auto_transcribe: true, live_preview: options.livePreview === true };
+        if (command === 'gigastt_get_settings') {
+          if (options.settingsDelayMs) await new Promise(resolve => setTimeout(resolve, options.settingsDelayMs));
+          if (options.settingsError) throw new Error('Fixture could not load transcription settings');
+          return {
+            auto_transcribe: options.autoTranscribe !== false,
+            live_preview: options.livePreview === true,
+          };
+        }
         if (command === 'gigastt_get_job_state') return structuredClone(state.job);
         if (command === 'gigastt_model_download_state') return structuredClone(state.download);
         if (command === 'gigastt_model_status') return {
