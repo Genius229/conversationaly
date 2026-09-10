@@ -454,6 +454,10 @@ async fn run_retranscription<R: Runtime>(
         .map_err(|e| anyhow!("Failed to insert transcript: {}", e))?;
     }
 
+    // An explicit successful alternative provider replaces GigaSTT authority
+    // together with the rows; rollback must preserve both on failure.
+    super::post_transcription::job_state::clear_for_alternative(&mut tx, &meeting_id).await?;
+
     tx.commit().await
         .map_err(|e| anyhow!("Failed to commit transaction: {}", e))?;
 
@@ -585,6 +589,8 @@ fn write_retranscription_metadata(
             obj.insert("status".to_string(), serde_json::json!("completed"));
             obj.insert("transcript_file".to_string(), serde_json::json!("transcripts.json"));
             obj.remove("detected_summary_language");
+            obj.remove("transcript_authority");
+            obj.remove("gigastt_version");
         }
         value
     } else {

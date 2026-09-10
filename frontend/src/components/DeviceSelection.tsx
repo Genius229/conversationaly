@@ -150,7 +150,7 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
   const handleSystemDeviceChange = (deviceName: string) => {
     const newDevices = {
       ...selectedDevices,
-      systemDevice: deviceName === 'default' ? null : deviceName
+      systemDevice: deviceName === 'none' ? null : deviceName
     };
     onDeviceChange(newDevices);
 
@@ -323,7 +323,7 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
           </div>
 
           <Select
-            value={selectedDevices.systemDevice || 'default'}
+            value={selectedDevices.systemDevice || 'none'}
             onValueChange={handleSystemDeviceChange}
             disabled={disabled}
           >
@@ -331,7 +331,7 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
               <SelectValue placeholder="Select System Audio" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="default">Default System Audio</SelectItem>
+              <SelectItem value="none">None — microphone only</SelectItem>
               {outputDevices.map((device) => (
                 <SelectItem
                   key={device.name}
@@ -359,7 +359,7 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
       {/* Info text */}
       <div className="text-xs text-ink-muted space-y-1">
         <p>• <strong>Microphone:</strong> Records your voice and ambient sound</p>
-        <p>• <strong>System Audio:</strong> Records computer audio (music, calls, etc.)</p>
+        <p>• <strong>System Audio:</strong> Optional; choose a device to record computer audio</p>
         {isMonitoring && (
           <p>• <strong>Mic Levels:</strong> Green = good, Yellow = loud, Red = too loud</p>
         )}

@@ -1,0 +1,103 @@
+name: GigaSTT desktop Windows check
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/gigastt-post-transcription]
+    paths:
+      - '.github/workflows/gigastt-app-windows.yml'
+      - 'frontend/src-tauri/src/**'
+      - 'frontend/src/**'
+      - 'frontend/src-tauri/tauri.gigastt*.json'
+      - 'frontend/src-tauri/Cargo.toml'
+      - 'Cargo.lock'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: gigastt-app-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    uses: ./.github/workflows/gigastt-windows.yml
+  desktop:
+    needs: native
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      TRANSCRIBE_CMAKE_ARGS: -DGGML_NATIVE=OFF
+      CARGO_BUILD_JOBS: '2'
+      CMAKE_BUILD_PARALLEL_LEVEL: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: gigastt-desktop-cpu
+          workspaces: . -> target
+      - uses: actions/download-artifact@v4
+        with:
+          name: gigastt-v2.18.0-windows-x86_64-runtime-spike
+          path: frontend/src-tauri/binaries/gigastt-runtime
+      - name: Verify staged native runtime hashes and source pin
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = 'frontend/src-tauri/binaries/gigastt-runtime'
+          $manifest = Get-Content scripts/gigastt/windows-resources.json -Raw | ConvertFrom-Json
+          $inventory = Get-Content (Join-Path $root $manifest.packaging.runtimeInventoryName) -Raw | ConvertFrom-Json
+          if ($inventory.sourceCommit -ne $manifest.gigastt.sourceCommit) { throw 'GigaSTT source mismatch' }
+          foreach ($file in $inventory.packagedFiles) {
+            if ($file.name -ne [IO.Path]::GetFileName($file.name)) { throw 'Invalid runtime path' }
+            $hash = (Get-FileHash (Join-Path $root $file.name) -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($hash -ne $file.sha256) { throw "Runtime hash mismatch: $($file.name)" }
+          }
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+      - name: Build real llama-helper sidecar (CPU)
+        shell: pwsh
+        run: |
+          cargo build --release --locked -p llama-helper
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item target/release/llama-helper.exe frontend/src-tauri/binaries/llama-helper-x86_64-pc-windows-msvc.exe
+      - name: Build desktop and unsigned test installer with GigaSTT resources
+        working-directory: frontend
+        run: pnpm exec tauri build --config src-tauri/tauri.gigastt.ci.conf.json
+      - name: Check portable ggml instruction floor
+        shell: pwsh
+        run: ./scripts/assert-no-avx512.ps1
+      - name: Verify installer contains the pinned runtime and DLLs together
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installers = @(Get-ChildItem target/release/bundle/nsis/*.exe)
+          if ($installers.Count -ne 1) { throw 'Expected exactly one development installer' }
+          $out = Join-Path $env:RUNNER_TEMP 'gigastt-installer-check'
+          7z x $installers[0].FullName "-o$out" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Could not inspect NSIS payload' }
+          $binary = @(Get-ChildItem $out -Recurse -File -Filter gigastt.exe)
+          if ($binary.Count -ne 1) { throw 'Installer is missing its GigaSTT executable' }
+          $manifest = Get-Content scripts/gigastt/windows-resources.json -Raw | ConvertFrom-Json
+          $inventory = Get-Content (Join-Path 'frontend/src-tauri/binaries/gigastt-runtime' $manifest.packaging.runtimeInventoryName) -Raw | ConvertFrom-Json
+          foreach ($file in $inventory.packagedFiles) {
+            $path = Join-Path $binary[0].DirectoryName $file.name
+            $actual = (Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $file.sha256) { throw "Installer runtime mismatch: $($file.name)" }
+          }
+      - name: Upload unsigned development installer (not a production release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: conversationaly-gigastt-windows-unsigned-dev
+          path: target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 14

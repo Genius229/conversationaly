@@ -30,7 +30,7 @@ export function SetupOverviewStep() {
     {
       number: 1,
       type: 'transcription',
-      title: 'Download Transcription Engine',
+      title: 'Optional Live Transcript Preview',
     },
     {
       number: 2,
@@ -46,7 +46,7 @@ export function SetupOverviewStep() {
   return (
     <OnboardingContainer
       title="Setup Overview"
-      description="Conversationaly requires that you download the Transcription & Summarization AI models for the software to work."
+      description="Set up local summaries now. Live transcript preview is optional; authoritative GigaSTT transcription runs after recording."
       step={2}
       totalSteps={isMac ? 4 : 3}
     >

@@ -115,7 +115,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
 
       // Show success toast with device details
       const micDevice = prefs.preferred_mic_device || 'Default';
-      const systemDevice = prefs.preferred_system_device || 'Default';
+      const systemDevice = prefs.preferred_system_device || 'None (microphone only)';
       toast.success("Device preferences saved", {
         description: `Microphone: ${micDevice}, System Audio: ${systemDevice}`
       });
@@ -218,7 +218,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
         <div className="border-t pt-6">
           <h4 className="text-base font-medium text-ink mb-4">Default Audio Devices</h4>
           <p className="text-sm text-ink-muted mb-4">
-            Set your preferred microphone and system audio devices for recording. These will be automatically selected when starting new recordings.
+            Set your preferred microphone and optionally add a system audio device. New recordings use the microphone only when no system device is selected.
           </p>
 
           <div className="border rounded-lg p-4 bg-sunken">

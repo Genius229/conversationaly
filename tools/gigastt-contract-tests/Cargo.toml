@@ -7,11 +7,27 @@ publish = false
 # Exercise the production modules without Tauri/GTK or native inference builds.
 [workspace]
 
+[[test]]
+name = "post_transcription_finalization"
+path = "../../frontend/src-tauri/tests/post_transcription_finalization.rs"
+
+[[test]]
+name = "post_transcription_preview"
+path = "../../frontend/src-tauri/tests/post_transcription_preview.rs"
+
+[features]
+gigastt-test-fixtures = []
+
+[[test]]
+name = "post_transcription_job_state"
+path = "../../frontend/src-tauri/tests/post_transcription_job_state.rs"
+
 [lib]
 name = "app_lib"
 path = "lib.rs"
 
 [dependencies]
+sha2 = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -44,3 +60,12 @@ path = "../../frontend/src-tauri/tests/post_transcription_audio.rs"
 [[test]]
 name = "post_transcription_import"
 path = "../../frontend/src-tauri/tests/post_transcription_import.rs"
+
+[[test]]
+name = "post_transcription_service"
+path = "../../frontend/src-tauri/tests/post_transcription_service.rs"
+
+[[test]]
+name = "post_transcription_models"
+path = "../../frontend/src-tauri/tests/post_transcription_models.rs"
+required-features = ["gigastt-test-fixtures"]

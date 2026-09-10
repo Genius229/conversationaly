@@ -8,6 +8,8 @@ import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateCon
 import { recordingService } from '@/services/recordingService';
 import { showRecordingNotification } from '@/lib/recordingNotification';
 import { toast } from 'sonner';
+import { gigasttService } from '@/services/gigasttService';
+import { requiresLiveTranscriptionModel, type GigasttSettings } from '@/lib/gigastt';
 
 /**
  * What the start is currently blocked on. Only ever non-`idle` while
@@ -78,7 +80,7 @@ export function useRecordingStart(
    * case the caller must return without touching any state.
    *
    * Must be called as the first statement of a starter — before any `await`,
-   * including the `checkParakeetReady()` one.
+   * including the live-preview readiness check.
    */
   const beginStart = useCallback((): boolean => {
     if (isStartingRef.current) return false;
@@ -196,6 +198,28 @@ export function useRecordingStart(
     setStatus(RecordingStatus.IDLE);
   }, [checkIfModelDownloading, showModal, setStatus]);
 
+  // The local live-ASR model is a prerequisite only when the user explicitly
+  // enabled live draft preview. If settings cannot be read, preserve the old
+  // guard rather than bypassing readiness on an unknown configuration.
+  const ensureLivePreviewReady = useCallback(async (): Promise<boolean> => {
+    let settings: GigasttSettings | null = null;
+    try {
+      settings = await gigasttService.getSettings();
+    } catch (error) {
+      console.warn('Could not load GigaSTT settings before recording; keeping live-model guard:', error);
+    }
+
+    if (!requiresLiveTranscriptionModel(settings)) {
+      console.log('Live transcript preview is disabled; recording does not require a live ASR model');
+      return true;
+    }
+
+    const parakeetReady = await checkParakeetReady();
+    if (parakeetReady) return true;
+    await reportModelNotReady();
+    return false;
+  }, [checkParakeetReady, reportModelNotReady]);
+
   // Handle manual recording start (from button click)
   const handleRecordingStart = useCallback(async () => {
     // First statement: claim the start before the first await, so a double
@@ -206,16 +230,7 @@ export function useRecordingStart(
     }
 
     try {
-      console.log('handleRecordingStart called - checking Parakeet model status');
-
-      // Check if Parakeet transcription model is ready before starting
-      const parakeetReady = await checkParakeetReady();
-      if (!parakeetReady) {
-        await reportModelNotReady();
-        return;
-      }
-
-      console.log('Parakeet ready - setting up meeting title and state');
+      if (!(await ensureLivePreviewReady())) return;
 
       const randomTitle = generateMeetingTitle();
       setMeetingTitle(randomTitle);
@@ -252,7 +267,7 @@ export function useRecordingStart(
       // has to land here, or the record button stays disabled forever.
       endStart();
     }
-  }, [generateMeetingTitle, setMeetingTitle, setIsRecording, clearTranscripts, setIsMeetingActive, checkParakeetReady, reportModelNotReady, selectedDevices, setStatus, beginStart, endStart]);
+  }, [generateMeetingTitle, setMeetingTitle, setIsRecording, clearTranscripts, setIsMeetingActive, ensureLivePreviewReady, selectedDevices, setStatus, beginStart, endStart]);
 
   // Check for autoStartRecording flag and start recording automatically
   useEffect(() => {
@@ -270,12 +285,7 @@ export function useRecordingStart(
         // cannot re-enter this effect and queue a second start.
         sessionStorage.removeItem('autoStartRecording');
 
-        // Check if Parakeet transcription model is ready before starting
-        const parakeetReady = await checkParakeetReady();
-        if (!parakeetReady) {
-          await reportModelNotReady();
-          return;
-        }
+        if (!(await ensureLivePreviewReady())) return;
 
         // Generate meeting title
         const generatedMeetingTitle = generateMeetingTitle();
@@ -318,8 +328,7 @@ export function useRecordingStart(
     setIsRecording,
     clearTranscripts,
     setIsMeetingActive,
-    checkParakeetReady,
-    reportModelNotReady,
+    ensureLivePreviewReady,
     setStatus,
     beginStart,
     endStart,
@@ -334,19 +343,14 @@ export function useRecordingStart(
         return;
       }
 
-      console.log('Direct start from sidebar - checking Parakeet model status');
+      console.log('Direct start from sidebar');
       if (!beginStart()) {
         console.log('Start already in flight, ignoring direct start event');
         return;
       }
 
       try {
-        // Check if Parakeet transcription model is ready before starting
-        const parakeetReady = await checkParakeetReady();
-        if (!parakeetReady) {
-          await reportModelNotReady();
-          return;
-        }
+        if (!(await ensureLivePreviewReady())) return;
 
         // Generate meeting title
         const generatedMeetingTitle = generateMeetingTitle();
@@ -393,8 +397,7 @@ export function useRecordingStart(
     setIsRecording,
     clearTranscripts,
     setIsMeetingActive,
-    checkParakeetReady,
-    reportModelNotReady,
+    ensureLivePreviewReady,
     setStatus,
     beginStart,
     endStart,

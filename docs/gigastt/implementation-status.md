@@ -15,7 +15,7 @@ Updated: 2026-09-10. Branch: `feat/gigastt-post-transcription`.
 - Test-only fake executable is gated from normal desktop builds behind
   `gigastt-test-fixtures`. The independent headless harness compiles the same
   production modules, without GTK or inference model dependencies.
-- Task 4 foundations: temporary PCM16 mono 16 kHz WAV preparation through
+- Temporary PCM16 mono 16 kHz WAV preparation through
   the existing decoder adapter, streaming file upload, and atomic SQLite
   importer. A failed/cancelled import preserves old rows and provenance;
   normalized temp files are replaced atomically without modifying the archive.
@@ -23,20 +23,56 @@ Updated: 2026-09-10. Branch: `feat/gigastt-post-transcription`.
   word timings in meeting-level metadata. Segment rows retain their boundaries;
   no-segment fallback retains the full final text rather than raw word tokens.
   Stable IDs hash the full result once, not once for each row.
+- Complete coordinator: verify meeting identity, prepare audio, await sidecar,
+  submit/poll with a hard deadline, retain validated result JSON, atomically
+  import, then clean up. Import failure retains the result; post-commit cleanup
+  failure is reported as `cleanup_pending`, not as a failed transcription.
+- Explicit model install/repair for all eight pinned RNNT, punctuation and VAD
+  files, with SHA256 checks, bounded streaming downloads, cancellation and
+  throttled progress. No model download happens automatically at startup.
+- Native start/cancel/retry commands own and join background tasks. Durable job
+  state recovers interrupted runs; legacy retranscription clears Giga authority
+  atomically. Recording, transcription, diarization and model installation share
+  the exclusion guard where their resources overlap.
+- Stop hands off only the exact nonempty audio path returned by successful
+  finalization inside the meeting directory. A stale file from a previous save
+  cannot authorize automatic transcription.
+- Backend summary gating reads canonical final text and optional DB-derived
+  speaker annotations in one transaction. Using a draft requires explicit
+  `allowDraft`; failed required finalization does not silently fall back.
+- Settings default to automatic post-transcription on and live preview off.
+  Disabled preview drains audio without loading a live ASR model. Null system
+  input means microphone-only; null mic independently resolves the default mic.
+- Meeting UI supports progress, cancel/retry, model installation and explicit
+  draft summaries. Final rows must refresh successfully before automatic work;
+  optional diarization must finish before automatic summary. Refresh failures
+  preserve the displayed transcript and can be retried without rerunning STT.
 
 ## Commands and boundaries
 
 ```sh
-cargo test --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked
-cargo clippy --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked --all-targets -- -D warnings
+cargo test --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked --features gigastt-test-fixtures
+cargo clippy --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked --features gigastt-test-fixtures --all-targets -- -D warnings
+cd frontend
+node --experimental-strip-types src/lib/gigastt.test.ts
+pnpm exec tsc --noEmit
+pnpm run build
+cd ..
 git diff --check
 ```
 
-Local result: **50 passed, 0 failed** (15 client + 15 process lifecycle +
-9 audio preparation + 10 importer + 1 cleanup regression),
-Clippy exit 0. Tests include real loopback HTTP and owned fake subprocesses,
+Local Rust result: **88 passed, 0 failed** (15 client + 15 process lifecycle +
+9 audio preparation + 10 importer + 14 service + 15 models + 6 durable job state
++ 2 preview + 1 finalization + 1 environment regression), Clippy exit 0.
+Tests require permission to open loopback sockets; a socket-restricted sandbox
+is not a supported execution environment for these contract tests.
+Tests include real loopback HTTP and owned fake subprocesses,
 not actual GigaSTT model inference. Independent review and CI results are
 recorded as they finish; these local results do not certify the Windows app.
+
+Frontend verification: **9 state/contract tests passed**, TypeScript exit 0,
+Next production build exit 0 (12/12 pages). These are not a real Tauri UI or
+physical microphone acceptance run.
 
 Full native check attempted with `cargo check -p conversationaly --offline`:
 blocked in `alsa-sys` because this Linux host lacks `alsa.pc`. The Tauri
@@ -48,6 +84,13 @@ headless test result.
 - `GigaSTT contracts`: headless test/Clippy matrix on Ubuntu and Windows.
 - `GigaSTT native Windows gate`: pinned MSVC build, public Russian WAV
   fixture, hash-checked models, offline jobs inference and runtime inventory.
+- `GigaSTT desktop Windows check`: calls the pinned native build, verifies its
+  same-run artifact, builds the real CPU llama-helper and full Tauri application,
+  then extracts the unsigned development NSIS installer and verifies co-located
+  GigaSTT executable/DLL hashes. This gate is newly added; its first execution
+  is pending. Unsigned development artifacts are not production releases.
+  The development overlay uses a separate product name and identifier, so its
+  install directory and AppData/DB do not replace the regular application.
 - The packaging overlay is **opt-in**; ordinary Windows builds do not depend
   on an absent staged GigaSTT executable.
 - **Graceful Windows shutdown remains a release limitation.** The desktop
@@ -64,8 +107,10 @@ or audio) is in `evidence/windows-2026-09-10.json`. This remains a sidecar
 spike, not full installer/graceful-shutdown acceptance.
 
 Contract CI **PASS** on both Windows and Ubuntu:
-https://github.com/Genius229/conversationaly/actions/runs/34429705913
-(`33667f9`).
+https://github.com/Genius229/conversationaly/actions/runs/34452923901
+(`ce82663`, preceding integration). This fixes the Windows canonical/short-path
+assertion exposed by run `34432100449`; the new 88-test integration matrix still
+needs its own CI run.
 
 Initial run `34429102821` failed workflow validation because `runner.temp`
 is not permitted at job env scope; fixed with step initialization. Run
@@ -73,7 +118,7 @@ is not permitted at job env scope; fixed with step initialization. Run
 check bug: Windows API-set imports are virtual loader contracts, not always
 DLL files in System32. Fixed that classification and a PowerShell scalar
 OrderedDictionary `.Count` issue (verified locally for zero/one/two entries).
-Both new workflows now pass
+The GigaSTT workflows pass
 `actionlint v1.7.7` (shellcheck/pyflakes disabled; PowerShell/native execution
 is validated by CI, not by that static check). PowerShell 7.5.2 also parses
 both scripts locally without AST errors.
@@ -82,21 +127,13 @@ both scripts locally without AST errors.
 
 1. Close the graceful Windows shutdown release limitation with a
    supported/proven mechanism (native build/inference smoke already passes).
-2. Explicit first-use model download/repair action with progress and errors,
-   covering main RNNT **and** punctuation/VAD side models.
-3. Finish Task 4: connect the tested audio/client/importer components in the
-   post-transcription service; retain result JSON on import failure and remove
-   temporary files only after successful commit. **Service is not implemented yet.**
-4. Task 5: manual/retry commands, Stop orchestration, meeting provenance and
-   backend summary gating.
-5. Task 6: settings/default-off live preview, progress/cancel/retry UI.
-6. Task 7: full Windows app/installer gate and real microphone/long-recording
-   acceptance. Keep upstream recording durability intact.
-
-The application does not call the importer automatically yet: the service,
-recording integration and UI are still pending. Task 5's canonical summary
-read path must use `meeting_transcript_metadata.result_metadata.text` for
-`final_gigastt` (segment text can differ from the full ITN/punctuated text).
+2. Run the full Windows app/installer CI and fix native compilation or packaging
+   failures. Headless tests do not compile the Tauri adapters.
+3. Exercise the Rust model installer against the real pinned model host; current
+   installer tests use fake HTTP, while the proven Windows smoke uses PowerShell.
+4. Execute real Windows microphone/USB persistence, 60+ minute bounded-memory
+   recording, responsive UI, restart/cancel/retry and summary ordering acceptance.
+   Keep upstream recording durability intact. Checklist: `windows-acceptance.md`.
 
 ## Explicit local trust boundary
 

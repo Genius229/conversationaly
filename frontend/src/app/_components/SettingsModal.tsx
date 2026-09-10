@@ -191,7 +191,7 @@ export function SettingsModals({
             <button
               onClick={() => {
                 const micDevice = selectedDevices.micDevice || 'Default';
-                const systemDevice = selectedDevices.systemDevice || 'Default';
+                const systemDevice = selectedDevices.systemDevice || 'None (microphone only)';
                 toast.success("Devices selected", {
                   description: `Microphone: ${micDevice}, System Audio: ${systemDevice}`
                 });

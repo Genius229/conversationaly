@@ -838,6 +838,7 @@ dependencies = [
  "rubato 5.0.0",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "silero",
  "sqlx",
  "symphonia",

@@ -105,11 +105,13 @@ export function useSummaryGeneration({
     transcriptTexts,
     customPrompt = '',
     isRegeneration = false,
+    allowDraft = false,
   }: {
     transcriptText: string;
     transcriptTexts?: string[];
     customPrompt?: string;
     isRegeneration?: boolean;
+    allowDraft?: boolean;
   }) => {
     setSummaryStatus(isRegeneration ? 'regenerating' : 'processing');
     setSummaryError(null);
@@ -144,6 +146,7 @@ export function useSummaryGeneration({
         customPrompt: customPrompt,
         templateId: selectedTemplate,
         summaryLanguage,
+        allowDraft,
       }) as any;
 
       const process_id = result.process_id;
@@ -405,7 +408,10 @@ export function useSummaryGeneration({
   }, [speakerNames]);
 
   // Public API: Generate summary from transcripts
-  const handleGenerateSummary = useCallback(async (customPrompt: string = '') => {
+  const handleGenerateSummary = useCallback(async (
+    customPrompt: string = '',
+    options: { allowDraft?: boolean } = {},
+  ) => {
     // Check if model config is still loading
     if (isModelConfigLoading) {
       console.log('⏳ Model configuration is still loading, please wait...');
@@ -565,6 +571,7 @@ export function useSummaryGeneration({
     await processSummary({
       ...summaryPayload,
       customPrompt,
+      allowDraft: options.allowDraft === true,
     });
   }, [meeting.id, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary, modelConfig, isModelConfigLoading, selectedTemplate]);
 

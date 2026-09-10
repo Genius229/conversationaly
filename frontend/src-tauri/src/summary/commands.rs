@@ -343,6 +343,7 @@ pub async fn api_process_transcript<R: Runtime>(
     template_id: Option<String>,
     summary_language: Option<String>,
     _auth_token: Option<String>,
+    allow_draft: Option<bool>,
 ) -> Result<ProcessTranscriptResponse, String> {
     use uuid::Uuid;
 
@@ -354,6 +355,10 @@ pub async fn api_process_transcript<R: Runtime>(
     );
 
     let pool = state.db_manager.pool().clone();
+    // Enforce final authority before creating any summary process/chunk rows.
+    let text = crate::audio::post_transcription::job_state::summary_text(
+        &pool, &m_id, &text, allow_draft.unwrap_or(false),
+    ).await?;
     let final_prompt = custom_prompt.unwrap_or_else(|| "".to_string());
     let final_template_id = template_id.unwrap_or_else(|| "standard_meeting".to_string());
 

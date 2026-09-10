@@ -16,11 +16,16 @@ import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useSpeakerLabelling } from '@/hooks/useSpeakerLabelling';
+import { GigasttPanel } from '@/components/MeetingDetails/GigasttPanel';
+import type { UseGigasttMeetingResult } from '@/hooks/useGigasttMeeting';
+import { canAutomaticallyGenerateSummary } from '@/lib/gigastt';
 
 export default function PageContent({
   meeting,
   summaryData,
   cameFromRecording = false,
+  automaticPostProcessingReady = false,
+  gigastt,
   shouldAutoGenerate = false,
   onAutoGenerateComplete,
   onMeetingUpdated,
@@ -36,6 +41,8 @@ export default function PageContent({
   meeting: any;
   summaryData: Summary | null;
   cameFromRecording?: boolean;
+  automaticPostProcessingReady?: boolean;
+  gigastt: UseGigasttMeetingResult;
   shouldAutoGenerate?: boolean;
   onAutoGenerateComplete?: () => void;
   onMeetingUpdated?: () => Promise<void>;
@@ -135,6 +142,31 @@ export default function PageContent({
     meeting,
   });
 
+  const shouldAutoLabelSpeakers = isAutoLabelSpeakers && cameFromRecording;
+  const [automaticDiarizationSettled, setAutomaticDiarizationSettled] = useState(
+    !shouldAutoLabelSpeakers,
+  );
+  const { labelSpeakers } = useSpeakerLabelling({
+    meetingId: meeting.id,
+    meetingFolderPath: meeting.folder_path,
+    onComplete: async () => {
+      try {
+        await onRefetchTranscripts?.();
+      } catch (error) {
+        console.error('Speaker labels were saved but the transcript view could not refresh:', error);
+        toast.error('Speaker labels saved, but the transcript view could not refresh');
+      } finally {
+        setAutomaticDiarizationSettled(true);
+      }
+    },
+    onError: () => setAutomaticDiarizationSettled(true),
+  });
+  const automaticSummaryReady = canAutomaticallyGenerateSummary(
+    automaticPostProcessingReady,
+    shouldAutoLabelSpeakers,
+    automaticDiarizationSettled,
+  );
+
   useEffect(() => {
   }, []);
 
@@ -143,7 +175,13 @@ export default function PageContent({
     let cancelled = false;
 
     const autoGenerate = async () => {
-      if (shouldAutoGenerate && meetingData.transcripts.length > 0 && !cancelled) {
+      if (
+        shouldAutoGenerate
+        && automaticPostProcessingReady
+        && automaticSummaryReady
+        && meetingData.transcripts.length > 0
+        && !cancelled
+      ) {
         console.log(`🤖 Auto-generating summary with ${modelConfig.provider}/${modelConfig.model}...`);
         await summaryGeneration.handleGenerateSummary('');
 
@@ -160,40 +198,63 @@ export default function PageContent({
     return () => {
       cancelled = true;
     };
-  }, [shouldAutoGenerate, meeting.id]); // Re-run if meeting changes
+  }, [
+    shouldAutoGenerate,
+    automaticPostProcessingReady,
+    automaticSummaryReady,
+    meeting.id,
+  ]); // Re-run if final/optional speaker state changes for this meeting
 
-  // Automatic speaker labelling, on the same "just came from recording" gate as
-  // auto-summary above. Independent of it: summaries never read speaker labels,
-  // so neither job has to wait for the other.
-  const { labelSpeakers } = useSpeakerLabelling({
-    meetingId: meeting.id,
-    meetingFolderPath: meeting.folder_path,
-    onComplete: onRefetchTranscripts,
-  });
+  // When enabled, speaker labelling is part of the automatic sequence:
+  // final GigaSTT rows -> diarization-complete -> refreshed labelled rows -> summary.
   const autoLabelledRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!isAutoLabelSpeakers || !cameFromRecording) return;
-    if (!meeting.folder_path || meetingData.transcripts.length === 0) return;
-    // Once per meeting: this effect re-runs as transcripts page in.
-    if (autoLabelledRef.current === meeting.id) return;
+    if (!automaticPostProcessingReady) {
+      setAutomaticDiarizationSettled(false);
+      return;
+    }
+    if (!shouldAutoLabelSpeakers || !meeting.folder_path || meetingData.transcripts.length === 0) {
+      setAutomaticDiarizationSettled(true);
+      return;
+    }
 
-    autoLabelledRef.current = meeting.id;
-    // downloadIfMissing stays false: the user turned a setting on, they did not
-    // ask for a 139 MB download the moment a meeting ended.
-    labelSpeakers({ downloadIfMissing: false });
+    const authorityKey = `${meeting.id}:${gigastt.job?.run_id ?? 'current'}`;
+    if (autoLabelledRef.current === authorityKey) return;
+    autoLabelledRef.current = authorityKey;
+    setAutomaticDiarizationSettled(false);
+
+    let cancelled = false;
+    const start = async () => {
+      // downloadIfMissing stays false: enabling the setting does not silently
+      // start a 139 MB download. A missing optional model settles as skipped.
+      const accepted = await labelSpeakers({ downloadIfMissing: false });
+      if (!accepted && !cancelled) setAutomaticDiarizationSettled(true);
+    };
+    void start();
+    return () => {
+      cancelled = true;
+    };
   }, [
-    isAutoLabelSpeakers,
-    cameFromRecording,
+    automaticPostProcessingReady,
+    shouldAutoLabelSpeakers,
     meeting.id,
     meeting.folder_path,
     meetingData.transcripts.length,
+    gigastt.job?.run_id,
     labelSpeakers,
   ]);
 
   return (
     // No mount choreography — see /DESIGN.md → Motion.
     <div className="flex h-screen flex-col bg-canvas">
+      <GigasttPanel
+        state={gigastt}
+        hasCurrentTranscript={meetingData.transcripts.length > 0}
+        onSummarizeCurrentDraft={() => summaryGeneration.handleGenerateSummary('', {
+          allowDraft: true,
+        })}
+      />
       <div className="flex flex-1 overflow-hidden">
         <TranscriptPanel
           transcripts={meetingData.transcripts}

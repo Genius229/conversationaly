@@ -6,6 +6,22 @@
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct PostTranscriptionSettings {
+    pub auto_transcribe: bool,
+    pub live_preview: bool,
+}
+
+impl Default for PostTranscriptionSettings {
+    fn default() -> Self {
+        Self {
+            auto_transcribe: true,
+            live_preview: false,
+        }
+    }
+}
+
 /// State shown while a finalized recording is being replaced by GigaSTT.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]

@@ -11,6 +11,11 @@ import {
   applyPinnedSummaryLanguageToMeeting,
   detectAndCacheSummaryLanguage,
 } from '@/lib/summary-language-preferences';
+import { gigasttService } from '@/services/gigasttService';
+import {
+  recordingSaveDescription,
+  type GigasttFinalizationOutcome,
+} from '@/lib/gigastt';
 
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
@@ -143,17 +148,28 @@ export function useRecordingStop(
       // This function only handles post-stop processing (transcription wait, API call, navigation)
       console.log('Recording already stopped by RecordingControls, processing transcription...');
 
-      // Wait for transcription to complete
-      setStatus(RecordingStatus.PROCESSING_TRANSCRIPTS, 'Waiting for transcription...');
-      console.log('Waiting for transcription to complete...');
+      // When live preview is off there is no live decoder queue to drain. A
+      // settings read failure keeps the old guard as the conservative fallback:
+      // the frontend bypasses the live-model path only after an explicit false.
+      let livePreviewEnabled = true;
+      try {
+        livePreviewEnabled = (await gigasttService.getSettings()).live_preview;
+      } catch (settingsError) {
+        console.warn('Could not load GigaSTT settings; waiting for live transcription defensively:', settingsError);
+      }
+
+      setStatus(
+        RecordingStatus.PROCESSING_TRANSCRIPTS,
+        livePreviewEnabled ? 'Waiting for draft transcription...' : 'Finalizing recording...',
+      );
 
       const MAX_WAIT_TIME = 60000; // 60 seconds maximum wait (increased for longer processing)
       const POLL_INTERVAL = 500; // Check every 500ms
       let elapsedTime = 0;
-      let transcriptionComplete = false;
+      let transcriptionComplete = !livePreviewEnabled;
 
       // Poll for transcription status
-      while (elapsedTime < MAX_WAIT_TIME && !transcriptionComplete) {
+      while (livePreviewEnabled && elapsedTime < MAX_WAIT_TIME && !transcriptionComplete) {
         try {
           const status = await transcriptService.getTranscriptionStatus();
           console.log('Transcription status:', status);
@@ -187,7 +203,7 @@ export function useRecordingStop(
         }
       }
 
-      if (!transcriptionComplete && elapsedTime >= MAX_WAIT_TIME) {
+      if (livePreviewEnabled && !transcriptionComplete && elapsedTime >= MAX_WAIT_TIME) {
         console.warn('⏰ Transcription wait timeout reached after', elapsedTime, 'ms');
       } else {
         console.log('✅ Transcription completed after', elapsedTime, 'ms');
@@ -217,7 +233,7 @@ export function useRecordingStop(
       // Save to SQLite
       // NOTE: enabled to save COMPLETE transcripts after frontend receives all updates
       // This ensures user sees all transcripts streaming in before database save
-      if (isCallApi && transcriptionComplete == true) {
+      if (isCallApi) {
 
         setStatus(RecordingStatus.SAVING, 'Saving meeting to database...');
 
@@ -233,8 +249,6 @@ export function useRecordingStop(
           transcript_count: freshTranscripts.length,
           meeting_name: savedMeetingName || meetingTitle,
           folder_path: folderPath,
-          sample_text: freshTranscripts.length > 0 ? freshTranscripts[0].text.substring(0, 50) + '...' : 'none',
-          last_transcript: freshTranscripts.length > 0 ? freshTranscripts[freshTranscripts.length - 1].text.substring(0, 30) + '...' : 'none',
         });
 
         try {
@@ -248,6 +262,29 @@ export function useRecordingStop(
           if (!meetingId) {
             console.error('No meeting_id in response:', responseData);
             throw new Error('No meeting ID received from save operation');
+          }
+
+          // Saving the meeting is durable even when there was no live draft.
+          // The native helper validates the finalized-audio proof and owns the
+          // asynchronous job; failure here must never roll back the saved row.
+          let finalizationOutcome: GigasttFinalizationOutcome = 'failed';
+          try {
+            const finalization = await gigasttService.finalizeSavedMeeting(meetingId);
+            if (finalization) {
+              finalizationOutcome = 'accepted';
+              console.log('GigaSTT final transcription accepted:', {
+                meeting_id: finalization.meeting_id,
+                run_id: finalization.run_id,
+              });
+            } else {
+              finalizationOutcome = 'disabled';
+              console.log('Automatic GigaSTT final transcription is disabled');
+            }
+          } catch (finalizationError) {
+            console.error('Could not start GigaSTT final transcription:', finalizationError);
+            toast.error('Recording saved, but final transcription did not start', {
+              description: 'Open the meeting to retry GigaSTT. The recording and current transcript are preserved.',
+            });
           }
 
           let shouldDetectSummaryLanguage = false;
@@ -309,7 +346,7 @@ export function useRecordingStop(
 
           // Show success toast with navigation option
           toast.success('Recording saved successfully!', {
-            description: `${freshTranscripts.length} transcript segments saved.`,
+            description: recordingSaveDescription(finalizationOutcome, freshTranscripts.length),
             action: {
               label: 'View Meeting',
               onClick: () => {

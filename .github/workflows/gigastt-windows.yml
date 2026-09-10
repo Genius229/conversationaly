@@ -9,12 +9,13 @@ on:
       - 'scripts/gigastt/**'
       - 'frontend/src-tauri/tauri.gigastt.windows.conf.json'
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: gigastt-windows-${{ github.ref }}
+  group: gigastt-windows-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

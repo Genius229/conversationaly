@@ -57,6 +57,10 @@ export function usePaginatedTranscripts({
     const loadedMeetingIdRef = useRef<string | null>(null);
     const isLoadingRef = useRef(false);
     const lastLoadTimeRef = useRef(0); // Debounce protection
+    // Every replace-style load owns a generation. A Ready event can refetch
+    // while the route's initial draft request is still in flight; stale draft
+    // responses must not overwrite the newly imported GigaSTT transcript.
+    const requestGenerationRef = useRef(0);
 
     // Reset state when meeting changes
     const reset = useCallback(() => {
@@ -71,18 +75,24 @@ export function usePaginatedTranscripts({
     }, []);
 
     // Load meeting metadata
-    const loadMetadata = useCallback(async (): Promise<MeetingMetadata | null> => {
+    const loadMetadata = useCallback(async (
+        generation: number,
+        throwOnError: boolean = false,
+    ): Promise<MeetingMetadata | null> => {
         if (!meetingId) return null;
 
         try {
             const data = await invoke<MeetingMetadata>('api_get_meeting_metadata', {
                 meetingId,
             });
-            setMetadata(data);
+            if (requestGenerationRef.current === generation) setMetadata(data);
             return data;
         } catch (err) {
             console.error('Failed to load meeting metadata:', err);
-            setError('Failed to load meeting details');
+            if (!throwOnError && requestGenerationRef.current === generation) {
+                setError('Failed to load meeting details');
+            }
+            if (throwOnError) throw err;
             return null;
         }
     }, [meetingId]);
@@ -90,7 +100,9 @@ export function usePaginatedTranscripts({
     // Load transcripts at specific offset
     const loadTranscriptsAtOffset = useCallback(async (
         offset: number,
-        append: boolean = true
+        append: boolean = true,
+        generation: number = requestGenerationRef.current,
+        throwOnError: boolean = false,
     ): Promise<Transcript[]> => {
         if (!meetingId) return [];
 
@@ -105,6 +117,8 @@ export function usePaginatedTranscripts({
             );
 
             const newTranscripts = response.transcripts;
+
+            if (requestGenerationRef.current !== generation) return [];
 
             if (append) {
                 setTranscripts(prev => {
@@ -127,7 +141,10 @@ export function usePaginatedTranscripts({
             return newTranscripts;
         } catch (err) {
             console.error('Failed to load transcripts:', err);
-            setError('Failed to load transcripts');
+            if (!throwOnError && requestGenerationRef.current === generation) {
+                setError('Failed to load transcripts');
+            }
+            if (throwOnError) throw err;
             return [];
         }
     }, [meetingId]);
@@ -146,7 +163,8 @@ export function usePaginatedTranscripts({
         isLoadingRef.current = true;
         setIsLoadingMore(true);
         try {
-            await loadTranscriptsAtOffset(offsetRef.current, true);
+            const generation = requestGenerationRef.current;
+            await loadTranscriptsAtOffset(offsetRef.current, true, generation);
         } finally {
             setIsLoadingMore(false);
             isLoadingRef.current = false;
@@ -157,19 +175,24 @@ export function usePaginatedTranscripts({
     const refetch = useCallback(async () => {
         if (!meetingId) return;
 
-        reset();
-        setIsLoading(true);
+        const generation = ++requestGenerationRef.current;
+        // Preserve the current transcript until the replacement has loaded.
+        // GigaSTT import is atomic, and the UI refresh should be equally
+        // non-destructive if the follow-up read fails.
+        setError(null);
         try {
-            await loadMetadata();
-            await loadTranscriptsAtOffset(0, false);
+            await loadMetadata(generation, true);
+            await loadTranscriptsAtOffset(0, false, generation, true);
         } finally {
-            setIsLoading(false);
+            if (requestGenerationRef.current === generation) setIsLoading(false);
         }
-    }, [meetingId, reset, loadMetadata, loadTranscriptsAtOffset]);
+    }, [meetingId, loadMetadata, loadTranscriptsAtOffset]);
 
     // Initial load
     useEffect(() => {
         if (!meetingId) {
+            requestGenerationRef.current += 1;
+            loadedMeetingIdRef.current = null;
             reset();
             return;
         }
@@ -178,15 +201,16 @@ export function usePaginatedTranscripts({
         if (loadedMeetingIdRef.current === meetingId) return;
         loadedMeetingIdRef.current = meetingId;
 
+        const generation = ++requestGenerationRef.current;
         reset();
 
         const loadInitial = async () => {
             setIsLoading(true);
             try {
-                await loadMetadata();
-                await loadTranscriptsAtOffset(0, false);
+                await loadMetadata(generation);
+                await loadTranscriptsAtOffset(0, false, generation);
             } finally {
-                setIsLoading(false);
+                if (requestGenerationRef.current === generation) setIsLoading(false);
             }
         };
 

@@ -34,10 +34,10 @@ Upstream `bykof/conversationaly` was cloned at `0359c12d492fbc6583229547989977ec
 **Interfaces:**
 - Produces a pinned GigaSTT binary/resource manifest and a repeatable Windows smoke command.
 
-- [ ] Verify the pinned 2.18.0 server/CLI flags from its source and build on Windows MSVC.
-- [ ] Run `gigastt.exe` on loopback with a Russian WAV fixture; assert readiness and non-empty timestamped output.
-- [ ] Record required DLL/native runtime files and fail the script when smoke output is invalid.
-- [ ] Commit the spike evidence and packaging manifest.
+- [x] Verify the pinned 2.18.0 server/CLI flags from its source and build on Windows MSVC.
+- [x] Run `gigastt.exe` on loopback with a Russian WAV fixture; assert readiness and non-empty timestamped output.
+- [x] Record required DLL/native runtime files and fail the script when smoke output is invalid.
+- [x] Commit the spike evidence and packaging manifest. Windows run `34430238245`; evidence in `docs/gigastt/evidence/windows-2026-09-10.json`.
 
 ### Task 2: Post-transcription domain types and fake-client contract tests
 
@@ -50,9 +50,9 @@ Upstream `bykof/conversationaly` was cloned at `0359c12d492fbc6583229547989977ec
 - `GigasttClient::ready`, `submit_job`, `get_job`, `cancel_job`, `get_result` are typed async methods.
 - `PostTranscriptionState` includes `PreparingAudio`, `Starting`, `Transcribing { percent }`, `Finalizing`, `Ready`, `Failed`, `Cancelled`.
 
-- [ ] Write fake-server tests for ready, submit/progress/success, failure, cancellation, malformed JSON, and bounded HTTP errors.
-- [ ] Implement only the required endpoint DTOs and strict response validation.
-- [ ] Run the focused Rust tests and commit.
+- [x] Write fake-server tests for ready, submit/progress/success, failure, cancellation, malformed JSON, and bounded HTTP errors.
+- [x] Implement only the required endpoint DTOs and strict response validation.
+- [x] Run the focused Rust tests and commit.
 
 ### Task 3: Managed GigaSTT sidecar
 
@@ -61,10 +61,11 @@ Upstream `bykof/conversationaly` was cloned at `0359c12d492fbc6583229547989977ec
 - Modify: `frontend/src-tauri/src/lib.rs` and Tauri resource/bundle configuration
 - Test: `frontend/src-tauri/tests/gigastt_sidecar.rs`
 
-- [ ] Test state transitions, readiness timeout, clean shutdown, and one-time unexpected-exit restart with a fake executable.
-- [ ] Resolve binary/model paths via Tauri path APIs; launch loopback server with verified flags and `--enable-jobs --pool-size 1` equivalent.
-- [ ] Capture stdout/stderr diagnostics without transcript payloads and expose typed status.
-- [ ] Run tests and commit.
+- [x] Test state transitions, readiness timeout, bounded shutdown/reaping, and one-time unexpected-exit restart with a fake executable.
+- [ ] Prove graceful Windows shutdown; current Windows implementation uses bounded force/reap, not graceful termination.
+- [x] Resolve binary/model paths via Tauri path APIs; launch loopback server with verified flags and `--enable-jobs --pool-size 1` equivalent.
+- [x] Capture stdout/stderr diagnostics without transcript payloads and expose typed status.
+- [x] Run tests and commit.
 
 ### Task 4: Audio preparation and importer
 
@@ -77,7 +78,7 @@ Upstream `bykof/conversationaly` was cloned at `0359c12d492fbc6583229547989977ec
 - [x] Add failing tests for PCM16/mono/16 kHz WAV output, segment/word timestamp conversion, speaker/confidence mapping, malformed results, and atomic replacement rollback.
 - [x] Reuse the existing retranscription decoder/resampler; write `.processing/gigastt-input.wav` and preserve it on failure. Native decoder adapter is source-wired; full desktop compile remains a separate gate.
 - [x] Validate the complete result, generate stable new row IDs, and replace draft/live rows in one transaction only after validation. Preserve canonical top-level `result.text` in `meeting_transcript_metadata.result_metadata.text` for Task 5 summaries.
-- [ ] Implement the coordinator pipeline and progress sink, then run focused tests and commit.
+- [x] Implement the coordinator pipeline and progress sink, then run focused tests. Fourteen service tests cover cleanup/result retention and cancellation at the commit boundary; included in the integration commit.
 
 ### Task 5: Manual re-transcription and automatic Stop orchestration
 
@@ -87,9 +88,9 @@ Upstream `bykof/conversationaly` was cloned at `0359c12d492fbc6583229547989977ec
 - Create/modify: database migration/model for meeting-level transcript provenance
 - Test: integration tests for stop, retry, failure preservation, and existing-meeting re-transcription
 
-- [ ] Add commands for start/cancel/retry/re-transcribe and ensure they never block the Tauri UI thread.
-- [ ] Chain finalized audio -> service -> final transcript before automatic summary when enabled; preserve draft on all failures.
-- [ ] Verify app restart/recovery and transaction rollback; commit.
+- [x] Add commands for start/cancel/retry/re-transcribe and ensure they never block the Tauri UI thread.
+- [x] Chain finalized audio -> service -> final transcript before automatic summary when enabled; preserve draft on all failures.
+- [x] Verify durable interrupted-job recovery and transaction rollback in headless tests; included in the integration commit. Real app restart acceptance remains Task 7.
 
 ### Task 6: Progress/cancel/retry UI and summary gating
 
@@ -98,10 +99,12 @@ Upstream `bykof/conversationaly` was cloned at `0359c12d492fbc6583229547989977ec
 - Create/modify: settings component for `Live transcript during recording` (default off)
 - Test: frontend state/event tests
 
-- [ ] Render `Recording saved`, `Preparing audio`, percentage progress, `Finalizing transcript`, `Ready`, and actionable failure/cancel states.
-- [ ] Subscribe to Tauri events, keep the app usable during jobs, and expose retry/re-transcribe actions.
-- [ ] Ensure summaries consume only `final_gigastt` unless the user explicitly summarizes draft text.
-- [ ] Run frontend checks and commit.
+- [x] Render `Recording saved`, `Preparing audio`, percentage progress, `Finalizing transcript`, `Ready`, and actionable failure/cancel states.
+- [x] Subscribe to Tauri events, keep the app usable during jobs, and expose retry/re-transcribe actions.
+- [x] Ensure summaries consume only `final_gigastt` unless the user explicitly summarizes draft text.
+- [x] Run frontend checks; included in the integration commit. Nine focused tests, TypeScript and Next build (12 pages) pass; independent UI review approved.
+
+See `docs/gigastt/implementation-status.md` for current verification boundaries. Explicit model install/repair is also implemented (15 headless tests), as required by the spec. Physical UI/recording acceptance remains Task 7.
 
 ### Task 7: Windows end-to-end release gate
 
@@ -109,7 +112,7 @@ Upstream `bykof/conversationaly` was cloned at `0359c12d492fbc6583229547989977ec
 - Modify: Windows CI workflow, installer/resource manifest, release documentation
 - Create: Windows E2E smoke harness and test fixture manifest
 
-- [ ] Build the pinned sidecar on a Windows x86-64 runner, start it with a model fixture, transcribe Russian WAV, and assert timestamps/language/non-empty text.
+- [x] Build the pinned sidecar on a Windows x86-64 runner, start it with a model fixture, transcribe Russian WAV, and assert timestamps/language/non-empty text.
 - [ ] Verify installer includes executable and native runtime files but no Python dependency.
 - [ ] Execute manual acceptance: USB mic persistence, 60+ minute bounded-memory recording, responsive UI, restart recovery, cancel/retry, and summary ordering.
 - [ ] Publish evidence and commit the release gate.

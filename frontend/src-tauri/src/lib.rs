@@ -472,6 +472,8 @@ pub fn run() {
         )) as NotificationManagerState<tauri::Wry>)
         .manage(audio::init_system_audio_state())
         .manage(audio::post_transcription::tauri_adapter::GigasttSidecarState::default())
+        .manage(audio::post_transcription::commands::PostTranscriptionJobs::default())
+        .manage(audio::post_transcription::model_commands::ModelJobs::default())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
             log::info!("Starting application...");
@@ -753,6 +755,16 @@ pub fn run() {
             audio::post_transcription::tauri_adapter::gigastt_sidecar_status,
             audio::post_transcription::tauri_adapter::gigastt_start_sidecar,
             audio::post_transcription::tauri_adapter::gigastt_stop_sidecar,
+            audio::post_transcription::commands::gigastt_transcribe_meeting,
+            audio::post_transcription::commands::gigastt_cancel_transcription,
+            audio::post_transcription::commands::gigastt_get_job_state,
+            audio::post_transcription::commands::gigastt_finalize_saved_meeting,
+            audio::post_transcription::settings::gigastt_get_settings,
+            audio::post_transcription::settings::gigastt_save_settings,
+            audio::post_transcription::model_commands::gigastt_model_status,
+            audio::post_transcription::model_commands::gigastt_model_download_state,
+            audio::post_transcription::model_commands::gigastt_install_models,
+            audio::post_transcription::model_commands::gigastt_cancel_model_install,
             audio::retranscription::start_retranscription_command,
             audio::retranscription::cancel_retranscription_command,
             audio::retranscription::is_retranscription_in_progress_command,
@@ -778,6 +790,13 @@ pub fn run() {
                 tauri::RunEvent::Exit => {
                     log::info!("Application exiting, cleaning up resources...");
                     tauri::async_runtime::block_on(async {
+                        // Join post-transcription work before closing its DB or process.
+                        if let Some(jobs) = _app_handle.try_state::<audio::post_transcription::commands::PostTranscriptionJobs>() {
+                            jobs.close().await;
+                        }
+                        if let Some(models) = _app_handle.try_state::<audio::post_transcription::model_commands::ModelJobs>() {
+                            models.close().await;
+                        }
                         // Clean up database connection and checkpoint WAL
                         if let Some(app_state) = _app_handle.try_state::<state::AppState>() {
                             log::info!("Starting database cleanup...");

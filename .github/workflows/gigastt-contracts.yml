@@ -7,12 +7,14 @@ on:
     paths:
       - 'frontend/src-tauri/src/audio/post_transcription/**'
       - 'frontend/src-tauri/tests/**'
+      - 'frontend/src-tauri/migrations/**'
       - 'tools/gigastt-contract-tests/**'
       - '.github/workflows/gigastt-contracts.yml'
   pull_request:
     paths:
       - 'frontend/src-tauri/src/audio/post_transcription/**'
       - 'frontend/src-tauri/tests/**'
+      - 'frontend/src-tauri/migrations/**'
       - 'tools/gigastt-contract-tests/**'
       - '.github/workflows/gigastt-contracts.yml'
 
@@ -36,6 +38,6 @@ jobs:
         with:
           workspaces: tools/gigastt-contract-tests -> target
       - name: Test production modules against owned fake processes
-        run: cargo test --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked
+        run: cargo test --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked --features gigastt-test-fixtures
       - name: Clippy
-        run: cargo clippy --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked --all-targets -- -D warnings
+        run: cargo clippy --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked --features gigastt-test-fixtures --all-targets -- -D warnings

@@ -209,7 +209,13 @@ pub async fn complete_onboarding<R: Runtime>(
 
     status.completed = true;
     status.current_step = 4; // Max step (4 on macOS with permissions, 3 on other platforms)
-    status.model_status.parakeet = "downloaded".to_string();
+    // Live-off onboarding may intentionally skip this download. Do not record
+    // a fictional installed model; completed onboarding is independent of it.
+    status.model_status.parakeet = if crate::transcribe_engine::commands::transcribe_check_model_ready(app.clone()).await.is_ok() {
+        "downloaded"
+    } else {
+        "not_downloaded"
+    }.to_string();
     status.model_status.summary = "downloaded".to_string();
     status.model_status.selected_summary_model = Some(model.clone());
 

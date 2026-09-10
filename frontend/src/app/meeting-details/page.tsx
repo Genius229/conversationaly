@@ -9,6 +9,8 @@ import { LoaderIcon } from "lucide-react";
 import { useConfig } from "@/contexts/ConfigContext";
 import { usePaginatedTranscripts } from "@/hooks/usePaginatedTranscripts";
 import { RECOMMENDED_SUMMARY_MODEL } from "@/lib/onboarding-summary-model";
+import { useGigasttMeeting } from "@/hooks/useGigasttMeeting";
+import { canAutomaticallyPostProcess } from "@/lib/gigastt";
 
 interface MeetingDetailsResponse {
   id: string;
@@ -47,6 +49,13 @@ function MeetingDetailsContent() {
     error: transcriptError,
   } = usePaginatedTranscripts({ meetingId: meetingId || '' });
 
+  const gigastt = useGigasttMeeting(meetingId || '', refetch);
+  const automaticPostProcessingReady = canAutomaticallyPostProcess(
+    source === 'recording',
+    gigastt.job,
+    gigastt.transcriptReady,
+  );
+
   // Check if the recommended summary model is available in Ollama
   const checkForGemmaModel = useCallback(async (): Promise<boolean> => {
     try {
@@ -63,6 +72,11 @@ function MeetingDetailsContent() {
   // Set up auto-generation - respects DB as source of truth
   const setupAutoGeneration = useCallback(async () => {
     if (hasCheckedAutoGen) return; // Only check once
+
+    // A newly saved meeting may still contain an empty/stale live draft. Wait
+    // until GigaSTT imports the final transcript; failed/cancelled runs require
+    // the separate explicit "Summarize current draft" action.
+    if (!automaticPostProcessingReady) return;
 
     // Only auto-generate if navigated from recording
     if (source !== 'recording') {
@@ -113,7 +127,7 @@ function MeetingDetailsContent() {
     }
 
     setHasCheckedAutoGen(true);
-  }, [hasCheckedAutoGen, checkForGemmaModel, source, isAutoSummary]);
+  }, [hasCheckedAutoGen, checkForGemmaModel, source, isAutoSummary, automaticPostProcessingReady]);
 
   // Sync meeting metadata from pagination hook to meeting details state
   useEffect(() => {
@@ -312,6 +326,7 @@ function MeetingDetailsContent() {
       // 3. Meeting has transcripts
       // 4. Haven't checked yet
       if (
+        automaticPostProcessingReady &&
         meetingDetails &&
         meetingSummary === null &&
         meetingDetails.transcripts &&
@@ -324,7 +339,7 @@ function MeetingDetailsContent() {
     };
 
     checkAutoGen();
-  }, [meetingDetails, meetingSummary, hasCheckedAutoGen, setupAutoGeneration]);
+  }, [automaticPostProcessingReady, meetingDetails, meetingSummary, hasCheckedAutoGen, setupAutoGeneration]);
 
   if (error) {
     return (
@@ -357,6 +372,8 @@ function MeetingDetailsContent() {
     // Same gate as auto-summary: only a meeting we just finished recording.
     // Opening an old meeting must not silently start labelling it.
     cameFromRecording={source === 'recording'}
+    automaticPostProcessingReady={automaticPostProcessingReady}
+    gigastt={gigastt}
     shouldAutoGenerate={shouldAutoGenerate}
     onAutoGenerateComplete={() => setShouldAutoGenerate(false)}
     onMeetingUpdated={async () => {

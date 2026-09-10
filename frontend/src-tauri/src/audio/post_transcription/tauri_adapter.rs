@@ -11,6 +11,16 @@ use super::gigastt_sidecar::{GigasttSidecar, GigasttSidecarConfig, SidecarStatus
 
 pub use super::gigastt_sidecar::PINNED_GIGASTT_VERSION as GIGASTT_VERSION;
 
+pub fn model_directory<R: Runtime>(app: &AppHandle<R>) -> Result<std::path::PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "GigaSTT app data directory unavailable")?
+        .join("models")
+        .join("gigastt")
+        .join(GIGASTT_VERSION))
+}
+
 #[derive(Default)]
 pub struct GigasttSidecarState {
     manager: Mutex<Option<Arc<GigasttSidecar>>>,
@@ -34,10 +44,6 @@ impl GigasttSidecarState {
             .path()
             .resource_dir()
             .map_err(|_| "GigaSTT resource directory unavailable")?;
-        let app_data = app
-            .path()
-            .app_data_dir()
-            .map_err(|_| "GigaSTT app data directory unavailable")?;
         let binary_name = if cfg!(windows) {
             "gigastt.exe"
         } else {
@@ -45,10 +51,7 @@ impl GigasttSidecarState {
         };
         // Resources keep the executable and its native DLLs together. Never search PATH.
         let binary = resources.join("gigastt").join(binary_name);
-        let models = app_data
-            .join("models")
-            .join("gigastt")
-            .join(GIGASTT_VERSION);
+        let models = model_directory(app)?;
         let manager = Arc::new(
             GigasttSidecar::new(GigasttSidecarConfig::new(binary, models, None))
                 .map_err(|e| e.to_string())?,
@@ -88,6 +91,8 @@ pub async fn gigastt_start_sidecar<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, GigasttSidecarState>,
 ) -> Result<SidecarStatus, String> {
+    let _guard = crate::audio::retranscription::RetranscriptionGuard::acquire()?;
+    super::model_commands::require_pinned_models(&app).await?;
     let manager = state.manager(&app).await?;
     manager.ensure_ready().await.map_err(|e| e.to_string())?;
     Ok(manager.status().await)

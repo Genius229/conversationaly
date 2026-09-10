@@ -1,0 +1,15 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Conversationaly GigaSTT Dev",
+  "identifier": "com.conversationaly.gigastt-dev",
+  "bundle": {
+    "targets": ["nsis"],
+    "createUpdaterArtifacts": false,
+    "resources": {
+      "templates/*.json": "templates/",
+      "binaries/gigastt-runtime/*": "gigastt/"
+    },
+    "windows": {"signCommand": null}
+  },
+  "plugins": {"updater": {"endpoints": []}}
+}

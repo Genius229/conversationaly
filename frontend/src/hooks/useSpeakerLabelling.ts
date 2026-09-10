@@ -19,6 +19,7 @@ interface Options {
   meetingId?: string;
   meetingFolderPath?: string | null;
   onComplete?: () => void | Promise<void>;
+  onError?: (error: string) => void | Promise<void>;
 }
 
 /**
@@ -30,67 +31,92 @@ interface Options {
  * `downloadIfMissing` decides — an automatic run stays quiet, a click the user
  * made gets an answer.
  */
-export function useSpeakerLabelling({ meetingId, meetingFolderPath, onComplete }: Options) {
+export function useSpeakerLabelling({ meetingId, meetingFolderPath, onComplete, onError }: Options) {
   const [isLabelling, setIsLabelling] = useState(false);
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+  const listenersReadyRef = useRef<Promise<boolean>>(Promise.resolve(false));
 
   useEffect(() => {
     if (!meetingId) return;
 
     const unlisteners: UnlistenFn[] = [];
     let cancelled = false;
+    let resolveListenersReady: (ready: boolean) => void = () => {};
+    listenersReadyRef.current = new Promise(resolve => {
+      resolveListenersReady = resolve;
+    });
 
     const setup = async () => {
-      const done = await listen<DiarizationResult>('diarization-complete', async (event) => {
-        if (event.payload.meeting_id !== meetingId) return;
-        setIsLabelling(false);
+      try {
+        const done = await listen<DiarizationResult>('diarization-complete', async (event) => {
+          if (event.payload.meeting_id !== meetingId) return;
+          setIsLabelling(false);
 
-        const { speaker_count, unlabelled_count } = event.payload;
-        // "0 speakers" is a real outcome, not a failure: a recording with no
-        // detected speech reaches here, and saying "complete" would be a lie.
-        if (speaker_count === 0) {
-          toast.info('No speakers were detected in this recording.');
-        } else {
-          const missed =
-            unlabelled_count > 0 ? ` ${unlabelled_count} line(s) could not be attributed.` : '';
-          toast.success(
-            `Labelled ${speaker_count} speaker${speaker_count === 1 ? '' : 's'}.${missed}`
-          );
+          const { speaker_count, unlabelled_count } = event.payload;
+          // "0 speakers" is a real outcome, not a failure: a recording with no
+          // detected speech reaches here, and saying "complete" would be a lie.
+          if (speaker_count === 0) {
+            toast.info('No speakers were detected in this recording.');
+          } else {
+            const missed =
+              unlabelled_count > 0 ? ` ${unlabelled_count} line(s) could not be attributed.` : '';
+            toast.success(
+              `Labelled ${speaker_count} speaker${speaker_count === 1 ? '' : 's'}.${missed}`
+            );
+          }
+          await onCompleteRef.current?.();
+        });
+        if (cancelled) {
+          done();
+          resolveListenersReady(false);
+          return;
         }
-        await onCompleteRef.current?.();
-      });
-      if (cancelled) return done();
-      unlisteners.push(done);
+        unlisteners.push(done);
 
-      const failed = await listen<DiarizationError>('diarization-error', (event) => {
-        if (event.payload.meeting_id !== meetingId) return;
-        setIsLabelling(false);
-        toast.error(event.payload.error);
-      });
-      if (cancelled) {
-        failed();
-        unlisteners.forEach((u) => u());
-        return;
+        const failed = await listen<DiarizationError>('diarization-error', async (event) => {
+          if (event.payload.meeting_id !== meetingId) return;
+          setIsLabelling(false);
+          toast.error(event.payload.error);
+          await onErrorRef.current?.(event.payload.error);
+        });
+        if (cancelled) {
+          failed();
+          unlisteners.forEach((u) => u());
+          resolveListenersReady(false);
+          return;
+        }
+        unlisteners.push(failed);
+        resolveListenersReady(true);
+      } catch (error) {
+        unlisteners.forEach((unlisten) => unlisten());
+        resolveListenersReady(false);
+        console.error('Failed to set up speaker-labelling listeners:', error);
       }
-      unlisteners.push(failed);
     };
 
     setup();
     return () => {
       cancelled = true;
+      resolveListenersReady(false);
       unlisteners.forEach((u) => u());
     };
   }, [meetingId]);
 
   const labelSpeakers = useCallback(
     async ({ downloadIfMissing = false } = {}) => {
-      if (!meetingId || !meetingFolderPath || isLabelling) return;
+      if (!meetingId || !meetingFolderPath) return false;
+      if (isLabelling) return true;
 
       try {
+        if (!(await listenersReadyRef.current)) {
+          throw new Error('Speaker-labelling progress listener is unavailable');
+        }
         const downloaded = await invoke<boolean>('is_diarizer_downloaded_command');
         if (!downloaded) {
-          if (!downloadIfMissing) return;
+          if (!downloadIfMissing) return false;
 
           const sizeMb = await invoke<number>('diarizer_size_mb');
           setIsLabelling(true);
@@ -100,9 +126,12 @@ export function useSpeakerLabelling({ meetingId, meetingFolderPath, onComplete }
 
         setIsLabelling(true);
         await invoke('label_speakers_command', { meetingId, meetingFolderPath });
+        return true;
       } catch (error) {
         setIsLabelling(false);
         toast.error(String(error));
+        await onErrorRef.current?.(String(error));
+        return false;
       }
     },
     [meetingId, meetingFolderPath, isLabelling]

@@ -10,7 +10,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::task::JoinHandle;
 
 use super::{
@@ -37,6 +37,8 @@ pub use super::transcription::TranscriptUpdate;
 
 // Simple recording state tracking
 static IS_RECORDING: AtomicBool = AtomicBool::new(false);
+// Captured at Start; changing preferences must not change the active worker's Stop path.
+static ACTIVE_LIVE_PREVIEW: AtomicBool = AtomicBool::new(false);
 
 // Global recording manager and transcription task to keep them alive during recording
 static RECORDING_MANAGER: Mutex<Option<RecordingManager>> = Mutex::new(None);
@@ -236,15 +238,14 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     // download is the failure users actually hit, and it has to be caught before
     // the microphone opens. The load itself waits until capture is live — see
     // the comment further down.
-    info!("🔍 Checking transcription model availability before starting recording...");
-    if let Err(validation_error) =
-        crate::transcribe_engine::commands::transcribe_check_model_ready(app.clone()).await
-    {
-        error!("Model check failed: {}", validation_error);
-        emit_start_error(&app, &validation_error);
-        return Err(fail_start(&app, validation_error));
+    let live_preview = super::post_transcription::settings::load(&app).unwrap_or_default().live_preview;
+    ACTIVE_LIVE_PREVIEW.store(live_preview, Ordering::SeqCst);
+    if live_preview {
+        if let Err(validation_error) = crate::transcribe_engine::commands::transcribe_check_model_ready(app.clone()).await {
+            emit_start_error(&app, &validation_error);
+            return Err(fail_start(&app, validation_error));
+        }
     }
-    info!("✅ Transcription model check passed");
 
     // Async-first approach - no more blocking operations!
     info!("🚀 Starting async recording initialization");
@@ -340,18 +341,8 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
             }
         }
         None => {
-            info!("🔊 No system audio preference set, using system default");
-            match default_output_device() {
-                Ok(device) => {
-                    info!("✅ Using default system audio: '{}'", device.name);
-                    Some(Arc::new(device))
-                }
-                Err(e) => {
-                    warn!("⚠️ No default system audio available: {}", e);
-                    warn!("   Recording will continue with microphone only");
-                    None // System audio is optional
-                }
-            }
+            // Room recorder profile: system capture remains explicit/optional.
+            None
         }
     };
 
@@ -411,12 +402,11 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     // of being lost, and at RTF ~0.06 the decoder clears the backlog in a
     // fraction of the time it took to build.
     let validate_began = std::time::Instant::now();
-    if let Err(load_error) =
-        crate::transcribe_engine::commands::transcribe_validate_model_ready(app.clone()).await
-    {
-        error!("Model load failed after capture started: {}", load_error);
-        abort_started_capture(&app, &load_error).await;
-        return Err(load_error);
+    if live_preview {
+        if let Err(load_error) = crate::transcribe_engine::commands::transcribe_validate_model_ready(app.clone()).await {
+            abort_started_capture(&app, &load_error).await;
+            return Err(load_error);
+        }
     }
     let validate_ms = validate_began.elapsed().as_millis();
     drop(engine_lifecycle_guard);
@@ -424,7 +414,11 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     log_start_timings(capture_timings, validate_ms, start_began.elapsed().as_millis());
 
     // Start optimized parallel transcription task and store handle
-    let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
+    let task_handle = if live_preview {
+        transcription::start_transcription_task(app.clone(), transcription_receiver)
+    } else {
+        super::post_transcription::preview::discard_audio(transcription_receiver)
+    };
     {
         let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
         *global_task = Some(task_handle);
@@ -512,15 +506,14 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
 
     // Pre-flight only — see the twin comment in
     // `start_recording_with_meeting_name`. The load happens after capture.
-    info!("🔍 Checking transcription model availability before starting recording...");
-    if let Err(validation_error) =
-        crate::transcribe_engine::commands::transcribe_check_model_ready(app.clone()).await
-    {
-        error!("Model check failed: {}", validation_error);
-        emit_start_error(&app, &validation_error);
-        return Err(fail_start(&app, validation_error));
+    let live_preview = super::post_transcription::settings::load(&app).unwrap_or_default().live_preview;
+    ACTIVE_LIVE_PREVIEW.store(live_preview, Ordering::SeqCst);
+    if live_preview {
+        if let Err(validation_error) = crate::transcribe_engine::commands::transcribe_check_model_ready(app.clone()).await {
+            emit_start_error(&app, &validation_error);
+            return Err(fail_start(&app, validation_error));
+        }
     }
-    info!("✅ Transcription model check passed");
 
     // Parse devices
     let mic_device = if let Some(ref name) = mic_device_name {
@@ -528,7 +521,9 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
             fail_start(&app, format!("Invalid microphone device '{}': {}", name, e))
         })?))
     } else {
-        None
+        // The UI's null mic means "Default Microphone", independently of an
+        // optional selected system source; it never means "mute microphone".
+        Some(Arc::new(default_input_device().map_err(|e| fail_start(&app, format!("No microphone available: {e}")))?))
     };
 
     let system_device = if let Some(ref name) = system_device_name {
@@ -606,12 +601,11 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     // Load the model only now that capture is live — see the twin comment in
     // `start_recording_with_meeting_name`.
     let validate_began = std::time::Instant::now();
-    if let Err(load_error) =
-        crate::transcribe_engine::commands::transcribe_validate_model_ready(app.clone()).await
-    {
-        error!("Model load failed after capture started: {}", load_error);
-        abort_started_capture(&app, &load_error).await;
-        return Err(load_error);
+    if live_preview {
+        if let Err(load_error) = crate::transcribe_engine::commands::transcribe_validate_model_ready(app.clone()).await {
+            abort_started_capture(&app, &load_error).await;
+            return Err(load_error);
+        }
     }
     let validate_ms = validate_began.elapsed().as_millis();
     drop(engine_lifecycle_guard);
@@ -619,7 +613,11 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     log_start_timings(capture_timings, validate_ms, start_began.elapsed().as_millis());
 
     // Start optimized parallel transcription task and store handle
-    let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
+    let task_handle = if live_preview {
+        transcription::start_transcription_task(app.clone(), transcription_receiver)
+    } else {
+        super::post_transcription::preview::discard_audio(transcription_receiver)
+    };
     {
         let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
         *global_task = Some(task_handle);
@@ -773,6 +771,12 @@ pub async fn stop_recording<R: Runtime>(
     };
 
     if let Some(task_handle) = transcription_task {
+        if !ACTIVE_LIVE_PREVIEW.load(Ordering::SeqCst) {
+            // Capture has already stopped. The discard worker has no decoder
+            // backlog to flush; its sender can remain held until final save.
+            task_handle.abort();
+            let _ = task_handle.await;
+        } else {
         info!("⏳ Waiting for ALL transcription chunks to be processed (no timeout - preserving every chunk)");
 
         // Enhanced progress monitoring during shutdown
@@ -818,6 +822,8 @@ pub async fn stop_recording<R: Runtime>(
 
         // Stop progress monitoring
         progress_task.abort();
+        let _ = progress_task.await;
+        }
     } else {
         info!("ℹ️ No transcription task found to wait for");
     }
@@ -869,20 +875,25 @@ pub async fn stop_recording<R: Runtime>(
     let manager_for_cleanup = RECORDING_MANAGER.lock().unwrap().take();
 
     // Perform final cleanup with the manager if available
-    let (meeting_folder, meeting_name) = if let Some(mut manager) = manager_for_cleanup {
+    let (meeting_folder, meeting_name, finalized_audio) = if let Some(mut manager) = manager_for_cleanup {
         info!("🧹 Performing final cleanup and saving recording data");
 
         // Extract meeting info BEFORE async operations
         let meeting_folder = manager.get_meeting_folder();
         let meeting_name = manager.get_meeting_name();
 
-        match tokio::time::timeout(
+        let save_result = tokio::time::timeout(
             tokio::time::Duration::from_secs(300), // 5 minutes max for file I/O
             manager.save_recording_only(&app)
-        ).await {
-            Ok(Ok(_)) => {
+        ).await;
+        let finalized_audio = save_result.as_ref().ok().and_then(|saved| {
+            super::post_transcription::finalization::verified_audio(meeting_folder.as_deref(), saved)
+        });
+        match save_result {
+            Ok(Ok(Some(_))) => {
                 info!("✅ Recording data saved successfully during cleanup");
             }
+            Ok(Ok(None)) => { warn!("Recording stopped without a finalized audio file"); }
             Ok(Err(e)) => {
                 warn!(
                     "⚠️ Error during recording cleanup (transcripts preserved): {}",
@@ -894,13 +905,17 @@ pub async fn stop_recording<R: Runtime>(
                 warn!("⏱️ File I/O timeout (5 minutes) reached during save, continuing shutdown");
                 // Don't fail shutdown - transcripts are already preserved
             }
-        }
+        };
 
-        (meeting_folder, meeting_name)
+        (meeting_folder, meeting_name, finalized_audio)
     } else {
         info!("ℹ️ No recording manager available for cleanup");
-        (None, None)
+        (None, None, None)
     };
+
+    if let Some(jobs) = app.try_state::<super::post_transcription::commands::PostTranscriptionJobs>() {
+        jobs.record_finalization(meeting_folder.clone(), finalized_audio.clone());
+    }
 
     // Set recording flag to false
     info!("🔍 Setting IS_RECORDING to false");
@@ -940,7 +955,8 @@ pub async fn stop_recording<R: Runtime>(
         serde_json::json!({
             "message": "Recording stopped - frontend will save after all transcripts received",
             "folder_path": folder_path_str,
-            "meeting_name": meeting_name_str
+            "meeting_name": meeting_name_str,
+            "audio_finalized": finalized_audio.is_some()
         }),
     )
     .map_err(|e| e.to_string())?;
