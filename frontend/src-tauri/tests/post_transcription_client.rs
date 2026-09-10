@@ -170,6 +170,32 @@ fn client(addr: SocketAddr) -> GigasttClient {
 }
 
 #[tokio::test]
+async fn uploads_prepared_file_with_exact_length_and_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("input.wav");
+    let payload = vec![23_u8; 32769];
+    std::fs::write(&path, &payload).unwrap();
+    let (addr, requests, task) = fake_server(vec![FakeResponse::json(
+        202,
+        r#"{"job_id":"file_job","status":"queued","created_at":1}"#,
+    )])
+    .await;
+    let result = client(addr)
+        .submit_file(&path, &SubmitJobOptions::default())
+        .await
+        .unwrap();
+    task.await.unwrap();
+    assert_eq!(result.job_id, "file_job");
+    let requests = requests.lock().unwrap();
+    assert_eq!(
+        requests[0].headers["content-length"],
+        payload.len().to_string()
+    );
+    assert_eq!(requests[0].body, payload);
+    assert_eq!(std::fs::read(&path).unwrap(), payload);
+}
+
+#[tokio::test]
 async fn ready_parses_ready_and_not_ready_payloads() {
     let (addr, _requests, task) = fake_server(vec![
         FakeResponse::json(

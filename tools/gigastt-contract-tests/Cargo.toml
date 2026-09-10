@@ -18,9 +18,12 @@ thiserror = "2"
 reqwest = { version = "0.13", features = ["json", "stream", "query"] }
 futures-util = "0.3"
 tokio = { version = "1", features = ["full"] }
-tokio-util = "0.7"
+tokio-util = { version = "0.7", features = ["io"] }
 tempfile = "3"
 log = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
+sqlx = { version = "0.9", features = ["runtime-tokio", "sqlite", "chrono"] }
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
 
 [[test]]
 name = "post_transcription_client"
@@ -33,3 +36,11 @@ path = "../../frontend/src-tauri/tests/gigastt_sidecar.rs"
 [[bin]]
 name = "fake-gigastt"
 path = "../../frontend/src-tauri/tests/support/fake_gigastt.rs"
+
+[[test]]
+name = "post_transcription_audio"
+path = "../../frontend/src-tauri/tests/post_transcription_audio.rs"
+
+[[test]]
+name = "post_transcription_import"
+path = "../../frontend/src-tauri/tests/post_transcription_import.rs"

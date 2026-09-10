@@ -74,9 +74,9 @@ Upstream `bykof/conversationaly` was cloned at `0359c12d492fbc6583229547989977ec
 - Create: `frontend/src-tauri/src/audio/post_transcription/service.rs`
 - Test: `frontend/src-tauri/tests/post_transcription_import.rs`
 
-- [ ] Add failing tests for PCM16/mono/16 kHz WAV output, segment/word timestamp conversion, speaker/confidence mapping, malformed results, and atomic replacement rollback.
-- [ ] Reuse the existing retranscription decoder/resampler; write `.processing/gigastt-input.wav` and preserve it on failure.
-- [ ] Validate the complete result, generate stable new row IDs, and replace draft/live rows in one transaction only after validation.
+- [x] Add failing tests for PCM16/mono/16 kHz WAV output, segment/word timestamp conversion, speaker/confidence mapping, malformed results, and atomic replacement rollback.
+- [x] Reuse the existing retranscription decoder/resampler; write `.processing/gigastt-input.wav` and preserve it on failure. Native decoder adapter is source-wired; full desktop compile remains a separate gate.
+- [x] Validate the complete result, generate stable new row IDs, and replace draft/live rows in one transaction only after validation. Preserve canonical top-level `result.text` in `meeting_transcript_metadata.result_metadata.text` for Task 5 summaries.
 - [ ] Implement the coordinator pipeline and progress sink, then run focused tests and commit.
 
 ### Task 5: Manual re-transcription and automatic Stop orchestration

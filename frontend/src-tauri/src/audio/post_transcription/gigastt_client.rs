@@ -186,6 +186,40 @@ impl GigasttClient {
         validate_submit(&value)
     }
 
+    /// Submit a prepared WAV without buffering a second full audio copy.
+    pub async fn submit_file(
+        &self,
+        path: &std::path::Path,
+        options: &SubmitJobOptions,
+    ) -> Result<JobSubmitResponse, GigasttClientError> {
+        let read_error = |_| GigasttClientError::Transport("prepared audio cannot be read".into());
+        let file = tokio::fs::File::open(path).await.map_err(read_error)?;
+        let metadata = file.metadata().await.map_err(read_error)?;
+        if !metadata.is_file() || metadata.len() == 0 {
+            return Err(GigasttClientError::Transport(
+                "prepared audio is empty or not a file".into(),
+            ));
+        }
+        let response = self
+            .http
+            .post(self.url("/v1/jobs"))
+            .query(options)
+            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+            .header(reqwest::header::CONTENT_LENGTH, metadata.len())
+            .body(reqwest::Body::wrap_stream(
+                tokio_util::io::ReaderStream::new(file),
+            ))
+            .send()
+            .await
+            .map_err(|e| GigasttClientError::Transport(e.to_string()))?;
+        let status = response.status();
+        let body = self.read_body(response, self.max_json_bytes).await?;
+        if status != StatusCode::ACCEPTED {
+            return Err(http_error(status, &body));
+        }
+        validate_submit(&parse_json(&body)?)
+    }
+
     /// Fetch queue/progress state for one job.
     pub async fn get_job(&self, job_id: &str) -> Result<JobStatusResponse, GigasttClientError> {
         validate_job_id(job_id)?;
