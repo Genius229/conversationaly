@@ -46,7 +46,14 @@ jobs:
         with:
           workspaces: tools/gigastt-contract-tests -> target
       - name: Test production modules against owned fake processes
+        if: runner.os != 'Windows'
         run: cargo test --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked --features gigastt-test-fixtures --no-fail-fast
+      - name: Test Windows contracts without unrelated fixture CPU contention
+        if: runner.os == 'Windows'
+        # Each race test still runs its own concurrent tasks/processes. Only
+        # unrelated test cases are serialized; Windows cold-spawn/timer budgets
+        # must not compete with every other fake process in the same binary.
+        run: cargo test --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked --features gigastt-test-fixtures --no-fail-fast -- --test-threads=1
       - name: Verify pinned installer ordering and configuration contracts
         run: python -m unittest discover -s frontend/src-tauri/installer/tests -v
       - name: Repeat Windows lifecycle regressions
