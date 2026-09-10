@@ -163,7 +163,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     <SelectValue placeholder="Select provider" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="local">🏠 On-device (Recommended - Real-time)</SelectItem>
+                                    <SelectItem value="local">🏠 On-device models</SelectItem>
                                     <SelectItem value="builtin-ai">✨ Built-in AI — Gemma 4 (audio LLM)</SelectItem>
                                     {/* <SelectItem value="deepgram">☁️ Deepgram (Backup)</SelectItem>
                                     <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>

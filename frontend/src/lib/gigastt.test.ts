@@ -4,6 +4,9 @@ const {
   canAutomaticallyPostProcess,
   canAutomaticallyGenerateSummary,
   canSummarizeCurrentDraft,
+  createGigasttModelInstallAuthority,
+  gigasttCatalogMatches,
+  gigasttCatalogView,
   isGigasttJobActive,
   isGigasttModelReady,
   recordingSaveDescription,
@@ -106,6 +109,120 @@ test('model readiness requires every pinned file to be valid', () => {
     ],
   }), false);
   assert.equal(isGigasttModelReady({ version: '2.18.0', files: [] }), false);
+});
+
+test('GigaSTT catalog search names the final offline workflow, not the live model', () => {
+  for (const query of ['gigastt', '2.18.0', 'after recording', 'offline', 'russian', 'final transcript']) {
+    assert.equal(gigasttCatalogMatches(query), true, query);
+  }
+  assert.equal(gigasttCatalogMatches('gigaam q8 live'), false);
+});
+
+test('GigaSTT catalog status distinguishes download, repair, progress, and ready states', () => {
+  assert.deepEqual(
+    gigasttCatalogView({
+      version: '2.18.0',
+      files: [
+        { relative_path: 'encoder.onnx', state: 'missing' },
+        { relative_path: 'vocab.txt', state: 'missing' },
+      ],
+    }, { state: 'idle', progress: null, message: null }),
+    {
+      installed: false,
+      ready: false,
+      statusLabel: '2 files missing',
+      actionLabel: 'Download model',
+      filesLabel: '8 required',
+    },
+  );
+
+  assert.deepEqual(
+    gigasttCatalogView({
+      version: '2.18.0',
+      files: [
+        { relative_path: 'encoder.onnx', state: 'valid' },
+        { relative_path: 'vocab.txt', state: 'corrupt' },
+      ],
+    }, { state: 'idle', progress: null, message: null }),
+    {
+      installed: true,
+      ready: false,
+      statusLabel: '1 file damaged',
+      actionLabel: 'Repair model',
+      filesLabel: '8 required',
+    },
+  );
+
+  assert.deepEqual(
+    gigasttCatalogView(null, {
+      state: 'running',
+      progress: {
+        phase: 'downloading',
+        current_file: 'encoder.onnx',
+        file_index: 1,
+        file_count: 4,
+        bytes_done: 50,
+        bytes_total: 100,
+      },
+      message: null,
+    }),
+    {
+      installed: true,
+      ready: false,
+      statusLabel: 'Downloading · 13%',
+      actionLabel: null,
+      filesLabel: '8 required',
+    },
+  );
+
+  assert.deepEqual(
+    gigasttCatalogView(null, { state: 'ready', progress: null, message: null }),
+    {
+      installed: true,
+      ready: false,
+      statusLabel: 'Verifying local files',
+      actionLabel: null,
+      filesLabel: '8 required',
+    },
+  );
+
+  assert.deepEqual(
+    gigasttCatalogView({
+      version: '2.18.0',
+      files: [
+        { relative_path: 'encoder.onnx', state: 'valid' },
+        { relative_path: 'vocab.txt', state: 'valid' },
+      ],
+    }, { state: 'ready', progress: null, message: null }),
+    {
+      installed: true,
+      ready: true,
+      statusLabel: 'Ready · v2.18.0',
+      actionLabel: null,
+      filesLabel: '8 verified',
+    },
+  );
+});
+
+test('GigaSTT model install authority coalesces concurrent download requests', async () => {
+  const authority = createGigasttModelInstallAuthority();
+  let calls = 0;
+  let finish!: () => void;
+  const pending = new Promise<void>(resolve => { finish = resolve; });
+  const install = () => {
+    calls += 1;
+    return pending;
+  };
+
+  const first = authority.run(install);
+  const duplicate = authority.run(install);
+  assert.equal(first, duplicate);
+  assert.equal(calls, 1);
+
+  finish();
+  await first;
+  await authority.run(async () => { calls += 1; });
+  assert.equal(calls, 2);
 });
 
 test('download progress prefers bytes and falls back to completed files', () => {

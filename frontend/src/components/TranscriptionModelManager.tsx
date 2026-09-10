@@ -36,6 +36,9 @@ import { Search } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { languageHaystack, languageNames, languagesSummary } from '@/lib/languages';
 import { cn } from '@/lib/utils';
+import { GigasttModelCard } from '@/components/GigasttModelCard';
+import { useGigasttModel } from '@/hooks/useGigasttModel';
+import { gigasttCatalogMatches, gigasttCatalogView } from '@/lib/gigastt';
 
 interface Props {
   selectedModel?: string;
@@ -50,6 +53,7 @@ export default function TranscriptionModelManager({ selectedModel, onModelSelect
   const [sort, setSort] = useState<ModelSort>('catalog');
   const [query, setQuery] = useState('');
   const [installedOnly, setInstalledOnly] = useState(false);
+  const gigasttModel = useGigasttModel();
 
   const refresh = useCallback(async () => {
     try {
@@ -279,7 +283,13 @@ export default function TranscriptionModelManager({ selectedModel, onModelSelect
   // On disk, not merely usable: a corrupted or half-downloaded model is still
   // installed, and hiding the row someone needs to delete or retry is the one
   // outcome this filter must not produce.
-  const installedCount = models.filter((m) => m.status !== 'Missing').length;
+  const gigasttView = gigasttCatalogView(
+    gigasttModel.modelStatus,
+    gigasttModel.modelDownload,
+  );
+  const showGigastt = gigasttCatalogMatches(q) && (!installedOnly || gigasttView.installed);
+  const installedCount = models.filter((m) => m.status !== 'Missing').length
+    + (gigasttView.installed ? 1 : 0);
   const listed = sortModels(models, sort)
     .filter((m) => !installedOnly || m.status !== 'Missing')
     .filter(
@@ -310,7 +320,7 @@ export default function TranscriptionModelManager({ selectedModel, onModelSelect
           it is that measurement. Speed is estimated from file size. A WER only ranks
           against models measured on the same set; hover it to see which.
         </p>
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
           <div className="relative">
             <Search
               aria-hidden
@@ -355,14 +365,17 @@ export default function TranscriptionModelManager({ selectedModel, onModelSelect
         </div>
       </div>
 
-      {listed.length === 0 && (q || installedOnly) ? (
+      {!showGigastt && listed.length === 0 && (q || installedOnly) ? (
         <p className="py-6 text-center text-sm text-ink-muted">
           {installedOnly && installedCount === 0
             ? 'No models are installed yet. Turn off “Installed only” to download one.'
             : `No models match “${query.trim()}”.`}
         </p>
       ) : (
-        listed.map(card)
+        <>
+          {showGigastt && <GigasttModelCard state={gigasttModel} />}
+          {listed.map(card)}
+        </>
       )}
 
       <button

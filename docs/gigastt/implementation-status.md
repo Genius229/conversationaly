@@ -7,6 +7,11 @@ GigaSTT native inference smoke, Windows/Ubuntu contract matrix, Clippy and
 frontend checks. UI/backend reviews approved. Remaining acceptance boundaries
 are listed below; this is an unsigned development build, not a production release.
 
+Catalog usability follow-up: GigaSTT download/repair is now available directly
+in **Settings → Transcription → On-device models**, with shared meeting-panel
+state, search and Installed only. Local UI/browser checks and independent review
+passed; an updated Windows installer is pending. See `catalog-ui-verification.md`.
+
 ## Implemented and locally exercised
 
 - Typed v2.18 jobs client. Loopback-only HTTP, no proxy/redirects, bounded body
@@ -76,9 +81,11 @@ Tests include real loopback HTTP and owned fake subprocesses,
 not actual GigaSTT model inference. Independent review and CI results are
 recorded as they finish; these local results do not certify the Windows app.
 
-Frontend verification: **9 state/contract tests passed**, TypeScript exit 0,
+Frontend verification: **12 state/contract tests passed**, TypeScript exit 0,
 Next production build exit 0 (12/12 pages). These are not a real Tauri UI or
-physical microphone acceptance run.
+physical microphone acceptance run. The catalog follow-up also passes Chromium
+mock-IPC checks; its report explicitly identifies one unchanged stale upstream
+event-name test separately from the passing checks.
 
 Full native check attempted with `cargo check -p conversationaly --offline`:
 blocked in `alsa-sys` because this Linux host lacks `alsa.pc`. The Tauri
@@ -114,8 +121,9 @@ https://github.com/Genius229/conversationaly/actions/runs/34463264744
 Downloaded installer SHA256:
 `4023143dae30b4f6539f12b0e91ca98658cea315a190b151499424ddc2d7a64c`.
 Metadata-only evidence: `evidence/windows-desktop-2026-09-10.json`.
-Subsequent commits so far change only tests/CI/docs, not the packaged production
-code. Native spike in this run: 4 s audio, startup 3.087 s, job 1.57 s.
+This installer predates the catalog usability follow-up; it remains valid
+evidence for native integration, not the updated Settings card. Native spike in
+this run: 4 s audio, startup 3.087 s, job 1.57 s.
 
 Native build/inference **PASS**:
 https://github.com/Genius229/conversationaly/actions/runs/34430238245

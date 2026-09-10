@@ -4,26 +4,18 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import {
   mergeGigasttJobEvent,
   type GigasttJobSnapshot,
-  type GigasttModelAvailability,
-  type GigasttModelDownloadState,
-  type GigasttModelInstallProgress,
   type GigasttSettings,
 } from '@/lib/gigastt';
 import { gigasttService } from '@/services/gigasttService';
-
-const DEFAULT_DOWNLOAD_STATE: GigasttModelDownloadState = {
-  state: 'idle',
-  progress: null,
-  message: null,
-};
+import { useGigasttModel } from '@/hooks/useGigasttModel';
 
 export interface UseGigasttMeetingResult {
   job: GigasttJobSnapshot | null | undefined;
   transcriptReady: boolean;
   isRefreshingTranscript: boolean;
   settings: GigasttSettings | null;
-  modelStatus: GigasttModelAvailability | null;
-  modelDownload: GigasttModelDownloadState;
+  modelStatus: ReturnType<typeof useGigasttModel>['modelStatus'];
+  modelDownload: ReturnType<typeof useGigasttModel>['modelDownload'];
   isActing: boolean;
   error: string | null;
   startTranscription: () => Promise<void>;
@@ -51,10 +43,9 @@ export function useGigasttMeeting(
   const [transcriptReadyRun, setTranscriptReadyRun] = useState<string | null>(null);
   const [isRefreshingTranscript, setIsRefreshingTranscript] = useState(false);
   const [settings, setSettings] = useState<GigasttSettings | null>(null);
-  const [modelStatus, setModelStatus] = useState<GigasttModelAvailability | null>(null);
-  const [modelDownload, setModelDownload] = useState(DEFAULT_DOWNLOAD_STATE);
   const [isActing, setIsActing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const gigasttModel = useGigasttModel();
 
   const onTranscriptReadyRef = useRef(onTranscriptReady);
   onTranscriptReadyRef.current = onTranscriptReady;
@@ -70,19 +61,6 @@ export function useGigasttMeeting(
   meetingIdRef.current = meetingId;
   const actionGenerationRef = useRef(0);
   const authorityRefreshGenerationRef = useRef(0);
-  const modelStateGenerationRef = useRef(0);
-
-  const refreshModelStatus = useCallback(async () => {
-    const generation = modelStateGenerationRef.current;
-    try {
-      const status = await gigasttService.getModelStatus();
-      if (modelStateGenerationRef.current === generation) setModelStatus(status);
-    } catch (loadError) {
-      if (modelStateGenerationRef.current === generation) {
-        setError(`Could not check GigaSTT models: ${errorMessage(loadError)}`);
-      }
-    }
-  }, []);
 
   useEffect(() => {
     if (!meetingId) return;
@@ -99,7 +77,6 @@ export function useGigasttMeeting(
     refreshingRunRef.current = null;
     actionGenerationRef.current += 1;
     authorityRefreshGenerationRef.current += 1;
-    modelStateGenerationRef.current += 1;
     setJob(undefined);
     setTranscriptReadyRun(null);
     setIsRefreshingTranscript(false);
@@ -174,37 +151,6 @@ export function useGigasttMeeting(
         }
         unlisteners.push(jobUnlisten);
 
-        const progressUnlisten = await listen<GigasttModelInstallProgress>(
-          'gigastt-model-progress',
-          event => {
-            modelStateGenerationRef.current += 1;
-            setModelStatus(null);
-            setModelDownload({ state: 'running', progress: event.payload, message: null });
-          },
-        );
-        if (cancelled) {
-          progressUnlisten();
-          return;
-        }
-        unlisteners.push(progressUnlisten);
-
-        const modelStateUnlisten = await listen<GigasttModelDownloadState>(
-          'gigastt-model-state',
-          event => {
-            modelStateGenerationRef.current += 1;
-            setModelDownload(event.payload);
-            if (event.payload.state !== 'running' && event.payload.state !== 'idle') {
-              setModelStatus(null);
-              void refreshModelStatus();
-            }
-          },
-        );
-        if (cancelled) {
-          modelStateUnlisten();
-          return;
-        }
-        unlisteners.push(modelStateUnlisten);
-
         const legacyRetranscriptionUnlisten = await listen<LegacyRetranscriptionComplete>(
           'retranscription-complete',
           event => void handleLegacyRetranscriptionComplete(event.payload),
@@ -224,32 +170,15 @@ export function useGigasttMeeting(
 
       if (cancelled) return;
       const authorityGeneration = authorityRefreshGenerationRef.current;
-      const modelGeneration = modelStateGenerationRef.current;
-      const [persistedJob, loadedSettings, downloadState, availability] = await Promise.allSettled([
+      const [persistedJob, loadedSettings] = await Promise.allSettled([
         gigasttService.getJobState(meetingId),
         gigasttService.getSettings(),
-        gigasttService.getModelDownloadState(),
-        gigasttService.getModelStatus(),
       ]);
       if (cancelled) return;
 
       const loadErrors: string[] = [];
       if (loadedSettings.status === 'fulfilled') setSettings(loadedSettings.value);
       else loadErrors.push(`settings: ${errorMessage(loadedSettings.reason)}`);
-      if (downloadState.status === 'fulfilled') {
-        if (modelStateGenerationRef.current === modelGeneration) {
-          setModelDownload(downloadState.value);
-        }
-      } else if (modelStateGenerationRef.current === modelGeneration) {
-        loadErrors.push(`download state: ${errorMessage(downloadState.reason)}`);
-      }
-      if (availability.status === 'fulfilled') {
-        if (modelStateGenerationRef.current === modelGeneration) {
-          setModelStatus(availability.value);
-        }
-      } else if (modelStateGenerationRef.current === modelGeneration) {
-        loadErrors.push(`model files: ${errorMessage(availability.reason)}`);
-      }
 
       if (
         persistedJob.status === 'fulfilled'
@@ -279,7 +208,7 @@ export function useGigasttMeeting(
       cancelled = true;
       unlisteners.forEach(unlisten => unlisten());
     };
-  }, [meetingId, refreshModelStatus]);
+  }, [meetingId]);
 
   const retryTranscriptRefresh = useCallback(async () => {
     if (job?.state !== 'ready') return;
@@ -368,22 +297,6 @@ export function useGigasttMeeting(
     });
   }, [meetingId, runAction]);
 
-  const installModels = useCallback(async () => {
-    await runAction(async () => {
-      await gigasttService.installModels();
-      const generation = modelStateGenerationRef.current;
-      const state = await gigasttService.getModelDownloadState();
-      if (modelStateGenerationRef.current === generation) setModelDownload(state);
-    });
-  }, [runAction]);
-
-  const cancelModelInstall = useCallback(async () => {
-    await runAction(async () => {
-      const accepted = await gigasttService.cancelModelInstall();
-      if (!accepted) throw new Error('The GigaSTT model download is no longer running.');
-    });
-  }, [runAction]);
-
   const saveSettings = useCallback(async (nextSettings: GigasttSettings) => {
     const previous = settings;
     setIsActing(true);
@@ -404,16 +317,16 @@ export function useGigasttMeeting(
     transcriptReady: job?.state === 'ready' && transcriptReadyRun === job.run_id,
     isRefreshingTranscript,
     settings,
-    modelStatus,
-    modelDownload,
-    isActing,
-    error,
+    modelStatus: gigasttModel.modelStatus,
+    modelDownload: gigasttModel.modelDownload,
+    isActing: isActing || gigasttModel.isActing,
+    error: error ?? gigasttModel.error,
     startTranscription,
     cancelTranscription,
-    installModels,
-    cancelModelInstall,
+    installModels: gigasttModel.installModels,
+    cancelModelInstall: gigasttModel.cancelModelInstall,
     saveSettings,
-    refreshModelStatus,
+    refreshModelStatus: gigasttModel.refreshModelStatus,
     retryTranscriptRefresh,
   };
 }

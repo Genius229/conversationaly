@@ -30,6 +30,9 @@ that development profile; production data is not an acceptance fixture.
       download; Stop saves the audio and reports actionable missing models.
 - [ ] Use the explicit model download action. Check progress, cancel, retry,
       successful verification and repair of a deliberately removed model file.
+      In the catalog-update build, find it in **Settings → Transcription →
+      On-device models → GigaSTT** (`After recording · Offline`). The original
+      `119b77e` build exposes this control only on an existing meeting page.
 - [ ] Disconnect networking after models are installed. Record 30–60 seconds of
       Russian speech. Confirm Stop saves first, then final transcription runs
       locally and reaches Ready with readable punctuation and timestamps.
