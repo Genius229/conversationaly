@@ -37,6 +37,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 # Dropped vs the whisper-rs era: `coreml` (transcribe.cpp has no CoreML path;
 # Metal covers Apple Silicon) and `openblas` (its CPU path uses tinyBLAS).
 [features]
+gigastt-test-fixtures = []
 default = ["platform-default"]  # Automatically enables best backend per platform
 
 # Platform-appropriate defaults - see target-specific dependencies below
@@ -181,6 +182,16 @@ transcribe-cpp = { git = "https://github.com/handy-computer/transcribe.cpp", rev
 
 [dev-dependencies]
 tempfile = "3.3.0"
+
+[[bin]]
+name = "fake-gigastt"
+path = "tests/support/fake_gigastt.rs"
+required-features = ["gigastt-test-fixtures"]
+
+[[test]]
+name = "gigastt_sidecar"
+path = "tests/gigastt_sidecar.rs"
+required-features = ["gigastt-test-fixtures"]
 
 # NOTE: this file used to carry a [patch.crates-io] for cpal and esaxx-rs.
 # Cargo ignores [patch] outside the workspace root, so it never applied and

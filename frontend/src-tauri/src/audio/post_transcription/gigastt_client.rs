@@ -69,8 +69,6 @@ pub enum GigasttClientError {
 #[derive(Debug, Deserialize)]
 struct ErrorResponse {
     #[serde(default)]
-    error: Option<String>,
-    #[serde(default)]
     code: Option<String>,
     #[serde(default)]
     retry_after_ms: Option<u64>,
@@ -97,10 +95,25 @@ impl GigasttClient {
         timeout: Duration,
     ) -> Result<Self, GigasttClientError> {
         let base_url = base_url.into().trim_end_matches('/').to_string();
-        if !(base_url.starts_with("http://") || base_url.starts_with("https://")) {
-            return Err(GigasttClientError::InvalidBaseUrl(base_url));
+        let url = reqwest::Url::parse(&base_url).map_err(|_| {
+            GigasttClientError::InvalidBaseUrl("expected a loopback HTTP origin".into())
+        })?;
+        if url.scheme() != "http"
+            || url.host_str() != Some("127.0.0.1")
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.path() != "/"
+            || url.query().is_some()
+            || url.fragment().is_some()
+            || timeout.is_zero()
+        {
+            return Err(GigasttClientError::InvalidBaseUrl(
+                "expected a loopback HTTP origin and nonzero timeout".into(),
+            ));
         }
         let http = Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
             .timeout(timeout)
             .build()
             .map_err(|e| GigasttClientError::Transport(e.to_string()))?;
@@ -134,9 +147,12 @@ impl GigasttClient {
             .map_err(|e| GigasttClientError::Transport(e.to_string()))?;
         let status = response.status();
         let body = self.read_body(response, self.max_json_bytes).await?;
+        if status != StatusCode::OK && status != StatusCode::SERVICE_UNAVAILABLE {
+            return Err(http_error(status, &body));
+        }
         let value: ReadinessResponse = parse_json(&body)?;
         validate_readiness(&value)?;
-        if status == StatusCode::OK
+        if (status == StatusCode::OK && value.status == ReadinessStatus::Ready)
             || (status == StatusCode::SERVICE_UNAVAILABLE
                 && value.status == ReadinessStatus::NotReady)
         {
@@ -185,6 +201,11 @@ impl GigasttClient {
             return Err(http_error(status, &body));
         }
         let value: JobStatusResponse = parse_json(&body)?;
+        if value.job_id != job_id {
+            return Err(GigasttClientError::InvalidResponse(
+                "job id mismatch".into(),
+            ));
+        }
         validate_job_status(&value)
     }
 
@@ -230,6 +251,11 @@ impl GigasttClient {
         response: reqwest::Response,
         limit: usize,
     ) -> Result<Vec<u8>, GigasttClientError> {
+        let limit = if response.status().is_success() {
+            limit
+        } else {
+            limit.min(MAX_ERROR_BODY_BYTES)
+        };
         let mut stream = response.bytes_stream();
         let mut body = Vec::new();
         while let Some(chunk) = stream.next().await {
@@ -244,7 +270,13 @@ impl GigasttClient {
 }
 
 fn parse_json<T: DeserializeOwned>(body: &[u8]) -> Result<T, GigasttClientError> {
-    serde_json::from_slice(body).map_err(|e| GigasttClientError::InvalidResponse(e.to_string()))
+    serde_json::from_slice(body).map_err(|e| {
+        GigasttClientError::InvalidResponse(format!(
+            "invalid JSON schema at line {}, column {}",
+            e.line(),
+            e.column()
+        ))
+    })
 }
 
 fn validate_job_id(job_id: &str) -> Result<(), GigasttClientError> {
@@ -260,8 +292,9 @@ fn validate_job_id(job_id: &str) -> Result<(), GigasttClientError> {
 
 fn validate_readiness(value: &ReadinessResponse) -> Result<ReadinessResponse, GigasttClientError> {
     if value.status == ReadinessStatus::Ready
-        && value.pool_available.is_none()
-        && value.pool_total.is_none()
+        && (value.pool_available.is_none()
+            || value.pool_total.is_none()
+            || value.pool_total == Some(0))
     {
         return Err(GigasttClientError::InvalidResponse(
             "ready response has no pool fields".into(),
@@ -324,7 +357,9 @@ fn validate_result(value: &TranscribeResponse) -> Result<TranscribeResponse, Gig
             "duration must be a non-negative finite number".into(),
         ));
     }
+    validate_confidence(value.confidence)?;
     for word in &value.words {
+        validate_confidence(word.confidence)?;
         validate_span(word.start, word.end, "word")?;
         if word.word.trim().is_empty() {
             return Err(GigasttClientError::InvalidResponse(
@@ -335,9 +370,42 @@ fn validate_result(value: &TranscribeResponse) -> Result<TranscribeResponse, Gig
     if let Some(segments) = &value.segments {
         for segment in segments {
             validate_span(segment.start, segment.end, "segment")?;
+            if segment.text.trim().is_empty() {
+                return Err(GigasttClientError::InvalidResponse(
+                    "empty segment text".into(),
+                ));
+            }
+            if segment.words.is_empty() {
+                return Err(GigasttClientError::InvalidResponse(
+                    "non-empty segment has no words".into(),
+                ));
+            }
+            for word in &segment.words {
+                validate_span(word.start, word.end, "word")?;
+                validate_confidence(word.confidence)?;
+                if word.start < segment.start || word.end > segment.end {
+                    return Err(GigasttClientError::InvalidResponse(
+                        "word timestamps fall outside segment".into(),
+                    ));
+                }
+                if word.word.trim().is_empty() {
+                    return Err(GigasttClientError::InvalidResponse(
+                        "empty word text".into(),
+                    ));
+                }
+            }
         }
     }
     Ok(value.clone())
+}
+
+fn validate_confidence(confidence: Option<f32>) -> Result<(), GigasttClientError> {
+    if confidence.is_some_and(|v| !v.is_finite() || !(0.0..=1.0).contains(&v)) {
+        return Err(GigasttClientError::InvalidResponse(
+            "invalid confidence".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_span(start: f64, end: f64, label: &str) -> Result<(), GigasttClientError> {
@@ -351,21 +419,11 @@ fn validate_span(start: f64, end: f64, label: &str) -> Result<(), GigasttClientE
 
 fn http_error(status: StatusCode, body: &[u8]) -> GigasttClientError {
     let parsed = serde_json::from_slice::<ErrorResponse>(body).ok();
-    let message = parsed
-        .as_ref()
-        .and_then(|e| e.error.clone())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| {
-            let text = String::from_utf8_lossy(body).trim().to_string();
-            if text.is_empty() {
-                status
-                    .canonical_reason()
-                    .unwrap_or("HTTP error")
-                    .to_string()
-            } else {
-                text.chars().take(512).collect()
-            }
-        });
+    // Error bodies can include recognized text. Never forward them to logs/UI.
+    let message = status
+        .canonical_reason()
+        .unwrap_or("HTTP error")
+        .to_string();
     GigasttClientError::Http {
         status: status.as_u16(),
         code: parsed.as_ref().and_then(|e| e.code.clone()),

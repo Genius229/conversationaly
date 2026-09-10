@@ -1,0 +1,41 @@
+name: GigaSTT contracts
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/gigastt-post-transcription]
+    paths:
+      - 'frontend/src-tauri/src/audio/post_transcription/**'
+      - 'frontend/src-tauri/tests/**'
+      - 'tools/gigastt-contract-tests/**'
+      - '.github/workflows/gigastt-contracts.yml'
+  pull_request:
+    paths:
+      - 'frontend/src-tauri/src/audio/post_transcription/**'
+      - 'frontend/src-tauri/tests/**'
+      - 'tools/gigastt-contract-tests/**'
+      - '.github/workflows/gigastt-contracts.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools/gigastt-contract-tests -> target
+      - name: Test production modules against owned fake processes
+        run: cargo test --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked
+      - name: Clippy
+        run: cargo clippy --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked --all-targets -- -D warnings

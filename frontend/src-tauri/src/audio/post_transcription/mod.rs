@@ -5,9 +5,15 @@
 //! fake HTTP server before the sidecar lifecycle is wired in.
 
 pub mod gigastt_client;
+pub mod gigastt_sidecar;
+pub mod tauri_adapter;
 pub mod types;
 
 pub use gigastt_client::{GigasttClient, GigasttClientError, SubmitJobOptions};
+pub use gigastt_sidecar::{
+    DiagnosticKind, DiagnosticStream, GigasttSidecar, GigasttSidecarConfig,
+    SidecarDiagnostic, SidecarError, SidecarFailure, SidecarFailureKind, SidecarSnapshot, SidecarStatus,
+};
 pub use types::{
     GigasttJobStatus, GigasttResult, JobStatusResponse, JobSubmitResponse, PostTranscriptionState,
     ReadinessResponse, ReadinessStatus, Segment, TranscribeResponse, WordInfo,

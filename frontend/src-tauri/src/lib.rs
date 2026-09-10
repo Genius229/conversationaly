@@ -471,6 +471,7 @@ pub fn run() {
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
         )) as NotificationManagerState<tauri::Wry>)
         .manage(audio::init_system_audio_state())
+        .manage(audio::post_transcription::tauri_adapter::GigasttSidecarState::default())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
             log::info!("Starting application...");
@@ -749,6 +750,9 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             utils::open_system_settings,
             // Retranscription commands
+            audio::post_transcription::tauri_adapter::gigastt_sidecar_status,
+            audio::post_transcription::tauri_adapter::gigastt_start_sidecar,
+            audio::post_transcription::tauri_adapter::gigastt_stop_sidecar,
             audio::retranscription::start_retranscription_command,
             audio::retranscription::cancel_retranscription_command,
             audio::retranscription::is_retranscription_in_progress_command,
@@ -787,6 +791,11 @@ pub fn run() {
                         }
 
                         // Clean up sidecar
+                        if let Some(state) = _app_handle.try_state::<audio::post_transcription::tauri_adapter::GigasttSidecarState>() {
+                            if let Err(error) = state.close().await {
+                                log::error!("GigaSTT shutdown failed: {}", error);
+                            }
+                        }
                         log::info!("Cleaning up sidecar...");
                         if let Err(e) = summary::summary_engine::force_shutdown_sidecar().await {
                             log::error!("Failed to force shutdown sidecar: {}", e);
