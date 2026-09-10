@@ -61,9 +61,10 @@ cd ..
 git diff --check
 ```
 
-Local Rust result: **88 passed, 0 failed** (15 client + 15 process lifecycle +
+Local Rust result: **89 passed, 0 failed** (15 client + 15 process lifecycle +
 9 audio preparation + 10 importer + 14 service + 15 models + 6 durable job state
-+ 2 preview + 1 finalization + 1 environment regression), Clippy exit 0.
++ 2 preview + 1 finalization + 1 environment + 1 disconnected-probe regression),
+Clippy exit 0.
 Tests require permission to open loopback sockets; a socket-restricted sandbox
 is not a supported execution environment for these contract tests.
 Tests include real loopback HTTP and owned fake subprocesses,
@@ -87,8 +88,10 @@ headless test result.
 - `GigaSTT desktop Windows check`: calls the pinned native build, verifies its
   same-run artifact, builds the real CPU llama-helper and full Tauri application,
   then extracts the unsigned development NSIS installer and verifies co-located
-  GigaSTT executable/DLL hashes. This gate is newly added; its first execution
-  is pending. Unsigned development artifacts are not production releases.
+  GigaSTT executable/DLL hashes. First run `34463264744` (`119b77e`) has passed
+  the native GigaSTT smoke and is building the desktop application; full build
+  and installer results are still pending. Unsigned development artifacts are
+  not production releases.
   The development overlay uses a separate product name and identifier, so its
   install directory and AppData/DB do not replace the regular application.
 - The packaging overlay is **opt-in**; ordinary Windows builds do not depend
@@ -109,8 +112,11 @@ spike, not full installer/graceful-shutdown acceptance.
 Contract CI **PASS** on both Windows and Ubuntu:
 https://github.com/Genius229/conversationaly/actions/runs/34452923901
 (`ce82663`, preceding integration). This fixes the Windows canonical/short-path
-assertion exposed by run `34432100449`; the new 88-test integration matrix still
-needs its own CI run.
+assertion exposed by run `34432100449`. Integration run `34463264459` (`119b77e`)
+passed Ubuntu but exposed a Windows test-fixture race: a cancelled readiness
+probe reset its socket, and fake-server `expect()` incorrectly crashed the
+process. The test-only fix tolerates disconnected writes, with a deterministic
+BrokenPipe regression. Updated 89-test Linux suite passes; Windows rerun pending.
 
 Initial run `34429102821` failed workflow validation because `runner.temp`
 is not permitted at job env scope; fixed with step initialization. Run

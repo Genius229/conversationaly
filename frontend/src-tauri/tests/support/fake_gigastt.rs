@@ -124,7 +124,7 @@ fn job_status(model_dir: &Path, poll: usize) -> (&'static str, u8) {
     (status, percent.parse().expect("fake percent"))
 }
 
-fn response(stream: &mut std::net::TcpStream, status: u16, body: &str) {
+fn response(stream: &mut impl Write, status: u16, body: &str) {
     let reason = match status {
         200 => "OK",
         202 => "Accepted",
@@ -139,10 +139,11 @@ fn response(stream: &mut std::net::TcpStream, status: u16, body: &str) {
         "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
-    stream
-        .write_all(response.as_bytes())
-        .expect("write response");
-    stream.flush().expect("flush response");
+    // Readiness futures are cancelled at the supervisor deadline. On Windows
+    // that can reset this socket while the fake is replying; a disconnected
+    // probe must not crash the fake and masquerade as a sidecar process exit.
+    let _ = stream.write_all(response.as_bytes());
+    let _ = stream.flush();
 }
 
 #[cfg(unix)]
@@ -304,5 +305,28 @@ fn main() {
             }
             Err(error) => panic!("fake accept failed: {error}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::response;
+    use std::io::{Error, ErrorKind, Result, Write};
+
+    struct DisconnectedClient;
+
+    impl Write for DisconnectedClient {
+        fn write(&mut self, _buffer: &[u8]) -> Result<usize> {
+            Err(Error::new(ErrorKind::BrokenPipe, "client disconnected"))
+        }
+
+        fn flush(&mut self) -> Result<()> {
+            Err(Error::new(ErrorKind::BrokenPipe, "client disconnected"))
+        }
+    }
+
+    #[test]
+    fn a_disconnected_probe_does_not_terminate_the_fake_server() {
+        response(&mut DisconnectedClient, 503, r#"{"status":"not_ready"}"#);
     }
 }
