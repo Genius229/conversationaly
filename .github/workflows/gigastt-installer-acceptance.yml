@@ -1,0 +1,54 @@
+name: GigaSTT installer acceptance
+
+on:
+  push:
+    branches: [feat/gigastt-post-transcription]
+    paths:
+      - 'tools/windows-installer-tests/**'
+      - '.github/workflows/gigastt-installer-acceptance.yml'
+  workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: 'Desktop build run containing the installer artifact'
+        required: true
+        default: '34490125378'
+      cooperative_quit:
+        description: 'Also test the new native cooperative quit integration'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  acceptance:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: conversationaly-gigastt-windows-unsigned-dev
+          path: installer-artifact
+          run-id: ${{ inputs.artifact_run_id || '34490125378' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install, block a locked update, then retry on real Windows
+        shell: pwsh
+        env:
+          COOPERATIVE_QUIT: ${{ inputs.cooperative_quit || 'false' }}
+        run: |
+          $installers = @(Get-ChildItem installer-artifact -Recurse -Filter '*-setup.exe')
+          if ($installers.Count -ne 1) { throw 'Expected one installer artifact' }
+          ./tools/windows-installer-tests/acceptance.ps1 `
+            -Installer $installers[0].FullName `
+            -EvidenceDir "$env:RUNNER_TEMP\installer-acceptance-evidence" `
+            -TestCooperativeQuit:($env:COOPERATIVE_QUIT -eq 'true')
+      - name: Upload acceptance diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-acceptance-evidence
+          path: ${{ runner.temp }}/installer-acceptance-evidence
+          if-no-files-found: error
+          retention-days: 14
