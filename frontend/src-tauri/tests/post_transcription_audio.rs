@@ -25,7 +25,11 @@ async fn preparation_uses_decoder_and_meeting_processing_folder() {
     .unwrap();
     assert_eq!(
         result.path,
-        dir.path().join(".processing/gigastt-input.wav")
+        // Windows resolves short names and adds the verbatim path prefix.
+        dir.path()
+            .join(".processing/gigastt-input.wav")
+            .canonicalize()
+            .unwrap()
     );
     assert_eq!(result.duration_seconds, 1.0);
     assert_eq!(fs::metadata(result.path).unwrap().len(), 32044);
