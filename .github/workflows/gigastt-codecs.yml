@@ -30,6 +30,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: tools/audio-codec-contract-tests -> target
+      - name: Install test-only media fixture tool on the Linux runner
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
       - name: Require real FFmpeg and matching production dependencies
         run: |
           ffmpeg -version
