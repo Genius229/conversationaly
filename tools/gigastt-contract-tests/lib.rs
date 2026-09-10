@@ -1,14 +1,16 @@
 //! Headless harness: compile the original source, never a test-only copy.
-#[path = "../../frontend/src-tauri/src/audio/post_transcription/finalization.rs"]
-pub mod finalization;
 #[path = "../../frontend/src-tauri/src/audio/post_transcription/artifacts.rs"]
 pub mod artifacts;
 #[path = "../../frontend/src-tauri/src/audio/post_transcription/audio_prepare.rs"]
 pub mod audio_prepare;
+#[path = "../../frontend/src-tauri/src/audio/post_transcription/finalization.rs"]
+pub mod finalization;
 #[path = "../../frontend/src-tauri/src/audio/post_transcription/gigastt_client.rs"]
 pub mod gigastt_client;
 #[path = "../../frontend/src-tauri/src/audio/post_transcription/gigastt_sidecar.rs"]
 pub mod gigastt_sidecar;
+#[path = "../../frontend/src-tauri/src/audio/post_transcription/import_audio.rs"]
+pub mod import_audio;
 #[path = "../../frontend/src-tauri/src/audio/post_transcription/importer.rs"]
 pub mod importer;
 #[path = "../../frontend/src-tauri/src/audio/post_transcription/job_state.rs"]
@@ -18,6 +20,8 @@ pub mod meeting_identity;
 #[cfg(feature = "gigastt-test-fixtures")]
 #[path = "../../frontend/src-tauri/src/audio/post_transcription/model_install.rs"]
 pub mod model_install;
+#[path = "../../frontend/src-tauri/src/onboarding_state.rs"]
+pub mod onboarding_state;
 #[path = "../../frontend/src-tauri/src/audio/post_transcription/preview.rs"]
 pub mod preview;
 #[path = "../../frontend/src-tauri/src/audio/post_transcription/service.rs"]
@@ -33,11 +37,12 @@ pub use types::*;
 
 pub mod audio {
     pub mod post_transcription {
-        pub use crate::finalization;
         pub use crate::audio_prepare;
+        pub use crate::finalization;
         pub use crate::gigastt_client;
         pub use crate::gigastt_sidecar;
         pub use crate::gigastt_sidecar::*;
+        pub use crate::import_audio;
         pub use crate::importer;
         pub use crate::importer::{map_result, replace_transcript, ImportError, ImportedRow};
         pub use crate::job_state;

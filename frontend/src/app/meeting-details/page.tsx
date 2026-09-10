@@ -11,6 +11,7 @@ import { usePaginatedTranscripts } from "@/hooks/usePaginatedTranscripts";
 import { RECOMMENDED_SUMMARY_MODEL } from "@/lib/onboarding-summary-model";
 import { useGigasttMeeting } from "@/hooks/useGigasttMeeting";
 import { canAutomaticallyPostProcess } from "@/lib/gigastt";
+import { isAutomaticPostProcessingSource } from "@/lib/import-audio";
 
 interface MeetingDetailsResponse {
   id: string;
@@ -50,8 +51,9 @@ function MeetingDetailsContent() {
   } = usePaginatedTranscripts({ meetingId: meetingId || '' });
 
   const gigastt = useGigasttMeeting(meetingId || '', refetch);
+  const automaticPostProcessingRequested = isAutomaticPostProcessingSource(source);
   const automaticPostProcessingReady = canAutomaticallyPostProcess(
-    source === 'recording',
+    automaticPostProcessingRequested,
     gigastt.job,
     gigastt.transcriptReady,
   );
@@ -78,9 +80,10 @@ function MeetingDetailsContent() {
     // the separate explicit "Summarize current draft" action.
     if (!automaticPostProcessingReady) return;
 
-    // Only auto-generate if navigated from recording
-    if (source !== 'recording') {
-      console.log('Not from recording navigation, skipping auto-generation');
+    // Only auto-generate for the newly recorded/imported routes that own the
+    // final GigaSTT sequence. Opening history never starts post-processing.
+    if (!automaticPostProcessingRequested) {
+      console.log('Not from an automatic post-processing route, skipping auto-generation');
       setHasCheckedAutoGen(true);
       return;
     }
@@ -127,7 +130,7 @@ function MeetingDetailsContent() {
     }
 
     setHasCheckedAutoGen(true);
-  }, [hasCheckedAutoGen, checkForGemmaModel, source, isAutoSummary, automaticPostProcessingReady]);
+  }, [hasCheckedAutoGen, checkForGemmaModel, automaticPostProcessingRequested, isAutoSummary, automaticPostProcessingReady]);
 
   // Sync meeting metadata from pagination hook to meeting details state
   useEffect(() => {
@@ -369,9 +372,9 @@ function MeetingDetailsContent() {
   return <PageContent
     meeting={meetingDetails}
     summaryData={meetingSummary}
-    // Same gate as auto-summary: only a meeting we just finished recording.
-    // Opening an old meeting must not silently start labelling it.
-    cameFromRecording={source === 'recording'}
+    // Same gate as auto-summary: only a meeting just recorded or explicitly
+    // imported. Opening history must not silently start speaker labelling.
+    automaticPostProcessingRequested={automaticPostProcessingRequested}
     automaticPostProcessingReady={automaticPostProcessingReady}
     gigastt={gigastt}
     shouldAutoGenerate={shouldAutoGenerate}

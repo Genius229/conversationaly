@@ -15,6 +15,11 @@ https://github.com/Genius229/conversationaly/actions/runs/34477334327
 (`188d1c8`), installer artifact `10152866908`. Metadata-only evidence:
 `evidence/windows-catalog-2026-09-10.json`. See `catalog-ui-verification.md`.
 
+Next approved follow-up is implemented and locally verified: **Import audio →
+GigaSTT** plus optional first-run model setup with no automatic downloads.
+Native ownership/transaction reviews and built-page browser checks passed;
+new Windows CI is pending. See `import-onboarding-verification.md`.
+
 ## Implemented and locally exercised
 
 - Typed v2.18 jobs client. Loopback-only HTTP, no proxy/redirects, bounded body
@@ -74,17 +79,16 @@ cd ..
 git diff --check
 ```
 
-Local Rust result: **98 passed, 0 failed** (15 client + 15 process lifecycle +
-9 audio preparation + 10 importer + 14 service + 15 models + 6 durable job state
-+ 2 preview + 1 finalization + 1 environment + 10 fake transport regressions),
-Clippy exit 0.
+Local Rust result: **112 passed, 0 failed**, including the previous 98 tests,
+import staging/transaction ownership, concurrent close, caller-drop regressions
+and truthful onboarding completion. Clippy exit 0.
 Tests require permission to open loopback sockets; a socket-restricted sandbox
 is not a supported execution environment for these contract tests.
 Tests include real loopback HTTP and owned fake subprocesses,
 not actual GigaSTT model inference. Independent review and CI results are
 recorded as they finish; these local results do not certify the Windows app.
 
-Frontend verification: **12 state/contract tests passed**, TypeScript exit 0,
+Frontend verification: **26 focused state/contract tests passed**, TypeScript exit 0,
 Next production build exit 0 (12/12 pages). These are not a real Tauri UI or
 physical microphone acceptance run. The catalog follow-up also passes Chromium
 mock-IPC checks; its report explicitly identifies one unchanged stale upstream
@@ -175,11 +179,11 @@ both scripts locally without AST errors.
 
 ## Remaining approved implementation
 
-Audio-format boundary: supported MP4 audio already decodes/resamples into a
-temporary PCM16 mono 16 kHz WAV before GigaSTT processing; original audio is
-preserved. The separate **Import audio** command still uses the legacy/builtin
-transcription route. Direct imported-file → GigaSTT orchestration was not part
-of the catalog-only follow-up and must not be presented as already implemented.
+Audio-format boundary: supported MP4 audio decodes/resamples into a temporary
+PCM16 mono 16 kHz WAV before GigaSTT processing; original audio is preserved.
+Direct imported-file → GigaSTT is now implemented in the follow-up, but the
+previously published `188d1c8` installer still uses the old Import audio path.
+Use the new installer only after its separate Windows gate is recorded.
 
 1. Close the graceful Windows shutdown release limitation with a
    supported/proven mechanism (native build/inference smoke already passes).

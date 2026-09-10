@@ -32,11 +32,12 @@ export function DownloadProgressStep() {
     setParakeetDownloaded,
     summaryModelDownloaded,
     setSummaryModelDownloaded,
-    startBackgroundDownloads,
+    modelSetupLoaded,
+    activeSetupDownloads,
     completeOnboarding,
   } = useOnboarding();
 
-  const [isMac, setIsMac] = useState(false);
+  const [isMac, setIsMac] = useState<boolean | null>(null);
   const [livePreviewEnabled, setLivePreviewEnabled] = useState<boolean | null>(null);
 
   const [parakeetState, setParakeetState] = useState<DownloadState>({
@@ -56,10 +57,18 @@ export function DownloadProgressStep() {
   });
 
   const [isCompleting, setIsCompleting] = useState(false);
-  const parakeetDownloadStartedRef = useRef(false);
-  const summaryDownloadStartedRef = useRef(false);
+  const completingRef = useRef(false);
   const retryingRef = useRef(false);
   const retryingSummaryRef = useRef(false);
+
+  useEffect(() => {
+    if (activeSetupDownloads.live) {
+      setParakeetState(previous => previous.status === 'waiting' ? { ...previous, status: 'downloading' } : previous);
+    }
+    if (activeSetupDownloads.summary) {
+      setSummaryState(previous => previous.status === 'waiting' ? { ...previous, status: 'downloading' } : previous);
+    }
+  }, [activeSetupDownloads]);
 
   // Retry download handler
   const handleRetryDownload = async () => {
@@ -75,7 +84,7 @@ export function DownloadProgressStep() {
     // Reset error state
     setParakeetState((prev) => ({
       ...prev,
-      status: 'waiting',
+      status: 'downloading',
       error: undefined,
       progress: 0,
       downloadedMb: 0,
@@ -173,45 +182,13 @@ export function DownloadProgressStep() {
         if (!cancelled) setLivePreviewEnabled(settings.live_preview);
       })
       .catch(error => {
-        console.warn('[DownloadProgressStep] Could not load GigaSTT settings; keeping live-model requirement:', error);
+        console.warn('[DownloadProgressStep] Could not load GigaSTT settings; showing optional live-model setup:', error);
         if (!cancelled) setLivePreviewEnabled(true);
       });
     return () => {
       cancelled = true;
     };
   }, []);
-
-  // Live ASR is optional. Do not download its 716 MB model for the default
-  // post-recording-only flow; an explicitly enabled live preview still gets
-  // the existing model setup.
-  useEffect(() => {
-    if (livePreviewEnabled !== true) return;
-    if (parakeetDownloadStartedRef.current) return;
-    parakeetDownloadStartedRef.current = true;
-
-    if (!parakeetDownloaded) {
-      setParakeetState((prev) => ({ ...prev, status: 'downloading' }));
-    }
-
-    startBackgroundDownloads({
-      includeParakeet: true,
-      includeSummary: false,
-    }).catch((error) => {
-      console.error('Failed to start Parakeet download:', error);
-      if (!parakeetDownloaded) {
-        setParakeetState((prev) => ({ ...prev, status: 'error', error: String(error) }));
-      }
-    });
-  }, [livePreviewEnabled, parakeetDownloaded, startBackgroundDownloads]);
-
-  // Start the selected summary model only after the backend recommendation is known.
-  useEffect(() => {
-    if (summaryDownloadStartedRef.current) return;
-    if (!selectedSummaryModel) return;
-    summaryDownloadStartedRef.current = true;
-
-    startSummaryDownload();
-  }, [selectedSummaryModel]);
 
   // Listen to Parakeet download progress
   useEffect(() => {
@@ -234,7 +211,7 @@ export function DownloadProgressStep() {
           speedMbps: speed_mbps ?? prev.speedMbps,
         }));
 
-        if (status === 'completed' || progress >= 100) {
+      if (status === 'completed') {
           setParakeetDownloaded(true);
         }
       }
@@ -297,7 +274,7 @@ export function DownloadProgressStep() {
           error: status === 'error' ? error : undefined,
         }));
 
-        if (status === 'completed' || progress >= 100) {
+        if (status === 'completed') {
           setSummaryModelDownloaded(true);
         }
       }
@@ -328,62 +305,19 @@ export function DownloadProgressStep() {
     }));
   }, [selectedSummaryModel, recommendedSummaryModel, summaryModelDownloaded]);
 
-  const startSummaryDownload = async () => {
-    if (!summaryModelDownloaded && selectedSummaryModel) {
-      try {
-        setSummaryState((prev) => ({
-          ...prev,
-          status: 'downloading',
-          totalMb: getSummaryModelSizeMb(selectedSummaryModel),
-        }));
-        await startBackgroundDownloads({
-          includeParakeet: false,
-          includeSummary: true,
-          summaryModel: selectedSummaryModel,
-        });
-      } catch (error) {
-        console.error('Failed to start summary model download:', error);
-        setSummaryState((prev) => ({ ...prev, status: 'error', error: String(error) }));
-      }
-    }
-  };
+  const hasActiveDownloads = parakeetState.status === 'downloading' || summaryState.status === 'downloading';
+  const downloadsComplete = (!livePreviewEnabled || parakeetState.status === 'completed') &&
+    summaryState.status === 'completed';
 
   const handleContinue = async () => {
-    if (livePreviewEnabled) {
-      // Verify actual live-model availability only when draft preview is on.
-      try {
-        await invoke('transcribe_init');
-        const actuallyAvailable = await invoke<boolean>('transcribe_has_available_models');
-
-        if (actuallyAvailable && !parakeetDownloaded) {
-          console.log('[DownloadProgressStep] Model available but state not updated');
-          setParakeetDownloaded(true);
-          setParakeetState((prev) => ({
-            ...prev,
-            status: 'completed',
-            progress: 100,
-          }));
-        } else if (!actuallyAvailable && parakeetState.status === 'error') {
-          toast.error('Live transcription engine required', {
-            description: 'Retry the download or turn off Live draft preview before continuing.',
-          });
-          return;
-        }
-      } catch (error) {
-        console.warn('[DownloadProgressStep] Failed to verify live model:', error);
-      }
-    }
-
-    // Check if downloads are complete for toast notification
-    const downloadsComplete = (!livePreviewEnabled || parakeetState.status === 'completed') &&
-      summaryState.status === 'completed';
-
-    // Show toast if downloads still in progress
-    if (!downloadsComplete) {
+    if (completingRef.current || isMac === null || !modelSetupLoaded) return;
+    completingRef.current = true;
+    setIsCompleting(true);
+    // Only a user-started download can reach this state. The CTA explicitly
+    // offers background continuation rather than disguising it as a skip.
+    if (hasActiveDownloads) {
       toast.info('Downloads will continue in the background', {
-        description: livePreviewEnabled
-          ? 'Recording with a live draft will be available once speech recognition is ready.'
-          : 'You can record now. Final GigaSTT models are installed explicitly from a meeting.',
+        description: 'You can manage or cancel them in Settings.',
         duration: 5000,
       });
     }
@@ -392,8 +326,7 @@ export function DownloadProgressStep() {
       // macOS: Go to Permissions step (will complete after permissions granted)
       goNext();
     } else {
-      // Non-macOS: Complete onboarding immediately (downloads continue in background)
-      setIsCompleting(true);
+      // Completion persists model choices, not a request to download them.
       try {
         await completeOnboarding();
 
@@ -406,6 +339,7 @@ export function DownloadProgressStep() {
         toast.error('Failed to complete setup', {
           description: 'Please try again.',
         });
+        completingRef.current = false;
         setIsCompleting(false);
       }
     }
@@ -431,7 +365,7 @@ export function DownloadProgressStep() {
         </div>
         <div>
           {state.status === 'waiting' && (
-            <span className="text-sm text-ink-muted">Waiting...</span>
+            <span className="text-sm text-ink-muted">Not downloaded</span>
           )}
           {state.status === 'downloading' && (
             <Loader2 className="w-5 h-5 text-ink animate-spin" />
@@ -446,6 +380,18 @@ export function DownloadProgressStep() {
           )}
         </div>
       </div>
+
+      {state.status === 'waiting' && (
+        <Button
+          type="button"
+          variant="outline"
+          disabled={isCompleting || (title === 'Summary Engine' && !selectedSummaryModel)}
+          onClick={title === 'Live Transcription Engine' ? handleRetryDownload : handleRetrySummaryDownload}
+        >
+          <Download className="size-4" aria-hidden="true" />
+          {title === 'Live Transcription Engine' ? 'Download live model' : 'Download summary model'}
+        </Button>
+      )}
 
       {/* Progress Bar */}
       {(state.status === 'downloading' || state.status === 'completed') && (
@@ -497,10 +443,8 @@ export function DownloadProgressStep() {
 
   return (
     <OnboardingContainer
-      title="Getting things ready"
-      description={livePreviewEnabled
-        ? 'Live draft preview needs a transcription model. Summary setup can continue in the background.'
-        : 'Live draft preview is off. Summary setup can continue in the background.'}
+      title="Optional model setup"
+      description="Nothing downloads automatically. Choose Download, or set up models later in Settings."
       step={3}
       totalSteps={isMac ? 4 : 3}
     >
@@ -523,9 +467,13 @@ export function DownloadProgressStep() {
           )}
         </div>
 
-        {/* Info Message - Only show when Parakeet is downloaded */}
+        <p className="max-w-lg text-sm text-ink-muted">
+          GigaSTT final transcription models are available in Settings → Transcription.
+        </p>
+
+        {/* Continuing an explicit download is a distinct, labelled action. */}
         <AnimatePresence>
-          {(livePreviewEnabled === false || parakeetDownloaded) && !summaryModelDownloaded && (
+          {hasActiveDownloads && (
             <motion.div
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -536,9 +484,9 @@ export function DownloadProgressStep() {
               <div className="flex items-start gap-3">
                 <Download className="w-5 h-5 text-ink-muted flex-shrink-0 mt-0.5" />
                 <div>
-                  <p className="font-medium">You can continue while this finishes</p>
+                  <p className="font-medium">Your selected downloads are running</p>
                   <p className="text-ink mt-1">
-                    Download will continue in the background.
+                    Choose Continue downloads in background to leave this step without stopping them.
                   </p>
                 </div>
               </div>
@@ -550,14 +498,13 @@ export function DownloadProgressStep() {
         <div className="w-full max-w-xs">
           <Button
             onClick={handleContinue}
-            disabled={livePreviewEnabled === null || (livePreviewEnabled && !parakeetDownloaded) || isCompleting}
+            disabled={isCompleting || isMac === null || !modelSetupLoaded}
             className="w-full h-11 bg-ink hover:bg-ink/90 text-canvas disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {(isCompleting || livePreviewEnabled === null || (livePreviewEnabled && !parakeetDownloaded)) ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              'Continue'
-            )}
+            {isCompleting && <Loader2 className="w-4 h-4 mr-2 animate-spin" aria-hidden="true" />}
+            {isCompleting ? 'Finishing setup…' : isMac === null || !modelSetupLoaded ? 'Checking setup…' : hasActiveDownloads
+              ? 'Continue downloads in background'
+              : downloadsComplete ? 'Continue' : 'Set up models later'}
           </Button>
         </div>
       </div>

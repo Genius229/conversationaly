@@ -14,6 +14,14 @@ const {
   modelInstallPercent,
   requiresLiveTranscriptionModel,
 } = require('./gigastt.ts') as typeof import('./gigastt');
+const {
+  canStartGigasttImport,
+  createImportValidationAuthority,
+  gigasttImportCommandArgs,
+  importErrorMessage,
+  importedMeetingRoute,
+  isAutomaticPostProcessingSource,
+} = require('./import-audio.ts') as typeof import('./import-audio');
 
 type GigasttJobSnapshot = import('./gigastt').GigasttJobSnapshot;
 
@@ -43,6 +51,55 @@ test('automatic post-processing waits for a final transcript and never uses fail
   assert.equal(canAutomaticallyPostProcess(true, job('ready'), true), true);
   assert.equal(canAutomaticallyPostProcess(true, null), true);
   assert.equal(canAutomaticallyPostProcess(false, job('ready'), true), false);
+});
+
+test('only newly recorded and imported meetings opt into automatic post-processing', () => {
+  assert.equal(isAutomaticPostProcessingSource('recording'), true);
+  assert.equal(isAutomaticPostProcessingSource('import'), true);
+  assert.equal(isAutomaticPostProcessingSource(null), false);
+  assert.equal(isAutomaticPostProcessingSource('history'), false);
+});
+
+test('accepted imports navigate to the import-owned meeting route', () => {
+  assert.equal(
+    importedMeetingRoute('meeting / 42'),
+    '/meeting-details?id=meeting%20%2F%2042&source=import',
+  );
+});
+
+test('GigaSTT import command sends only the fixed source path and title contract', () => {
+  assert.deepEqual(
+    gigasttImportCommandArgs('C:\\audio\\meeting.wav', 'Planning'),
+    { sourcePath: 'C:\\audio\\meeting.wav', title: 'Planning' },
+  );
+});
+
+test('import errors retain native string and structured messages', () => {
+  assert.equal(importErrorMessage('source audio does not exist', 'fallback'), 'source audio does not exist');
+  assert.equal(importErrorMessage(new Error('database unavailable'), 'fallback'), 'database unavailable');
+  assert.equal(importErrorMessage({ message: 'copy failed' }, 'fallback'), 'copy failed');
+  assert.equal(importErrorMessage({}, 'fallback'), 'fallback');
+});
+
+test('import validation authority invalidates late responses across reset and replacement', () => {
+  const authority = createImportValidationAuthority();
+  const first = authority.begin();
+  assert.equal(authority.isCurrent(first), true);
+
+  authority.invalidate();
+  assert.equal(authority.isCurrent(first), false);
+
+  const second = authority.begin();
+  const replacement = authority.begin();
+  assert.equal(authority.isCurrent(second), false);
+  assert.equal(authority.isCurrent(replacement), true);
+});
+
+test('GigaSTT import starts only with a selected file, verified model, and idle UI', () => {
+  assert.equal(canStartGigasttImport(true, true, false), true);
+  assert.equal(canStartGigasttImport(false, true, false), false);
+  assert.equal(canStartGigasttImport(true, false, false), false);
+  assert.equal(canStartGigasttImport(true, true, true), false);
 });
 
 test('automatic summary waits for optional speaker labelling to settle', () => {

@@ -6,6 +6,7 @@ import type {
   GigasttModelDownloadState,
   GigasttSettings,
 } from '@/lib/gigastt';
+import { gigasttImportCommandArgs } from '@/lib/import-audio';
 
 class GigasttService {
   getSettings(): Promise<GigasttSettings> {
@@ -22,6 +23,13 @@ class GigasttService {
 
   finalizeSavedMeeting(meetingId: string): Promise<GigasttJobSnapshot | null> {
     return invoke<GigasttJobSnapshot | null>('gigastt_finalize_saved_meeting', { meetingId });
+  }
+
+  importAudio(sourcePath: string, title: string): Promise<GigasttJobSnapshot> {
+    return invoke<GigasttJobSnapshot>(
+      'gigastt_import_audio',
+      gigasttImportCommandArgs(sourcePath, title),
+    );
   }
 
   cancelTranscription(meetingId: string): Promise<boolean> {

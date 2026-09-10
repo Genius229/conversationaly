@@ -1,5 +1,4 @@
-use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_store::StoreExt;
 use log::{info, warn, error};
 use anyhow::Result;
@@ -8,38 +7,9 @@ use crate::state::AppState;
 use crate::database::repositories::setting::SettingsRepository;
 
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct OnboardingStatus {
-    pub version: String,
-    pub completed: bool,
-    pub current_step: u8,
-    pub model_status: ModelStatus,
-    pub last_updated: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct ModelStatus {
-    pub parakeet: String,  // "downloaded" | "not_downloaded" | "downloading"
-    pub summary: String,   // Generic field for summary model (Gemma 4 variants)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub selected_summary_model: Option<String>,
-}
-
-impl Default for OnboardingStatus {
-    fn default() -> Self {
-        Self {
-            version: "1.0".to_string(),
-            completed: false,
-            current_step: 1,
-            model_status: ModelStatus {
-                parakeet: "not_downloaded".to_string(),
-                summary: "not_downloaded".to_string(),  // Changed from gemma
-                selected_summary_model: None,
-            },
-            last_updated: chrono::Utc::now().to_rfc3339(),
-        }
-    }
-}
+#[path = "onboarding_state.rs"]
+mod state;
+pub use state::OnboardingStatus;
 
 
 /// Load onboarding status from store
@@ -207,17 +177,17 @@ pub async fn complete_onboarding<R: Runtime>(
         .await
         .map_err(|e| format!("Failed to load onboarding status: {}", e))?;
 
-    status.completed = true;
-    status.current_step = 4; // Max step (4 on macOS with permissions, 3 on other platforms)
-    // Live-off onboarding may intentionally skip this download. Do not record
-    // a fictional installed model; completed onboarding is independent of it.
-    status.model_status.parakeet = if crate::transcribe_engine::commands::transcribe_check_model_ready(app.clone()).await.is_ok() {
-        "downloaded"
+    let live_ready = crate::transcribe_engine::commands::transcribe_check_model_ready(app.clone())
+        .await
+        .is_ok();
+    let summary_ready = if let Some(manager) = app.try_state::<crate::summary::summary_engine::commands::ModelManagerState>() {
+        crate::summary::summary_engine::commands::builtin_ai_is_model_ready(
+            app.clone(), manager, model.clone(), Some(true),
+        ).await.unwrap_or(false)
     } else {
-        "not_downloaded"
-    }.to_string();
-    status.model_status.summary = "downloaded".to_string();
-    status.model_status.selected_summary_model = Some(model.clone());
+        false
+    };
+    status.complete_with_models(model.clone(), live_ready, summary_ready);
 
     save_onboarding_status(&app, &status)
         .await

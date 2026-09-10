@@ -8,6 +8,7 @@ on:
       - '.github/workflows/gigastt-app-windows.yml'
       - 'frontend/src-tauri/src/**'
       - 'frontend/src/**'
+      - 'frontend/tests/**'
       - 'frontend/src-tauri/tauri.gigastt*.json'
       - 'frontend/src-tauri/Cargo.toml'
       - 'Cargo.lock'
@@ -64,9 +65,9 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: pnpm install --frozen-lockfile
-      - name: Test GigaSTT frontend contracts
+      - name: Test GigaSTT and onboarding frontend contracts
         working-directory: frontend
-        run: node --experimental-strip-types src/lib/gigastt.test.ts
+        run: node --experimental-strip-types --test src/lib/gigastt.test.ts tests/lib/onboarding-explicit-downloads.test.mjs
       - name: Build real llama-helper sidecar (CPU)
         shell: pwsh
         run: |

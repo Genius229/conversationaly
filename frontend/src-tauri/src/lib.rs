@@ -756,6 +756,7 @@ pub fn run() {
             audio::post_transcription::tauri_adapter::gigastt_start_sidecar,
             audio::post_transcription::tauri_adapter::gigastt_stop_sidecar,
             audio::post_transcription::commands::gigastt_transcribe_meeting,
+            audio::post_transcription::commands::gigastt_import_audio,
             audio::post_transcription::commands::gigastt_cancel_transcription,
             audio::post_transcription::commands::gigastt_get_job_state,
             audio::post_transcription::commands::gigastt_finalize_saved_meeting,

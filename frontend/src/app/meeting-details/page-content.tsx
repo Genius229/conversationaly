@@ -23,7 +23,7 @@ import { canAutomaticallyGenerateSummary } from '@/lib/gigastt';
 export default function PageContent({
   meeting,
   summaryData,
-  cameFromRecording = false,
+  automaticPostProcessingRequested = false,
   automaticPostProcessingReady = false,
   gigastt,
   shouldAutoGenerate = false,
@@ -40,7 +40,7 @@ export default function PageContent({
 }: {
   meeting: any;
   summaryData: Summary | null;
-  cameFromRecording?: boolean;
+  automaticPostProcessingRequested?: boolean;
   automaticPostProcessingReady?: boolean;
   gigastt: UseGigasttMeetingResult;
   shouldAutoGenerate?: boolean;
@@ -142,7 +142,7 @@ export default function PageContent({
     meeting,
   });
 
-  const shouldAutoLabelSpeakers = isAutoLabelSpeakers && cameFromRecording;
+  const shouldAutoLabelSpeakers = isAutoLabelSpeakers && automaticPostProcessingRequested;
   const [automaticDiarizationSettled, setAutomaticDiarizationSettled] = useState(
     !shouldAutoLabelSpeakers,
   );

@@ -9,6 +9,7 @@ pub mod audio_prepare;
 pub mod commands;
 pub mod gigastt_client;
 pub mod gigastt_sidecar;
+pub mod import_audio;
 pub mod importer;
 pub mod job_state;
 pub mod finalization;

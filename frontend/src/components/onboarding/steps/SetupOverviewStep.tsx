@@ -35,7 +35,7 @@ export function SetupOverviewStep() {
     {
       number: 2,
       type: 'summarization',
-      title: 'Download Summarization Engine',
+      title: 'Optional Local Summaries',
     },
   ];
 
@@ -46,7 +46,7 @@ export function SetupOverviewStep() {
   return (
     <OnboardingContainer
       title="Setup Overview"
-      description="Set up local summaries now. Live transcript preview is optional; authoritative GigaSTT transcription runs after recording."
+      description="Choose whether to download optional models. You can finish setup without them and install models later in Settings."
       step={2}
       totalSteps={isMac ? 4 : 3}
     >
@@ -94,7 +94,7 @@ export function SetupOverviewStep() {
             onClick={handleContinue}
             className="w-full h-11 bg-ink hover:bg-ink/90 text-canvas"
           >
-            Let's Go
+            Continue
           </Button>
           <div className="text-center">
             <a

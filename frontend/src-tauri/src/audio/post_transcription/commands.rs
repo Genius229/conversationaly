@@ -1,5 +1,9 @@
 //! Native job ownership, progress events and manual/retry commands.
 use super::{
+    import_audio::{
+        create_import_archive, discard_unpersisted_archive, persist_imported_meeting,
+        ImportAudioError, ImportWorkLease, ImportWorkRegistry,
+    },
     job_state,
     service::{PostTranscriptionRequest, PostTranscriptionService},
     tauri_adapter::GigasttSidecarState,
@@ -38,6 +42,7 @@ struct ActiveJob {
 pub struct PostTranscriptionJobs {
     active: Mutex<Option<ActiveJob>>,
     finalized: Mutex<Option<(PathBuf, Option<PathBuf>)>>,
+    imports: ImportWorkRegistry,
     closing: AtomicBool,
 }
 
@@ -58,6 +63,10 @@ impl PostTranscriptionJobs {
 
     pub async fn close(&self) {
         self.closing.store(true, Ordering::Release);
+        // Pre-accept import work can outlive its webview invocation. Cancel and
+        // join its RAII leases before the composition root closes SQLite or the
+        // sidecar. A partial archive is removed by the copy owner.
+        self.imports.close().await;
         let active = self.active.lock().unwrap_or_else(|e| e.into_inner()).take();
         if let Some(mut job) = active {
             job.cancel.cancel();
@@ -128,6 +137,7 @@ pub async fn gigastt_finalize_saved_meeting<R: Runtime>(
             meeting_id.clone(),
             Some(audio),
             Some(auto_run.clone()),
+            None,
         )
         .await
     } else {
@@ -164,7 +174,148 @@ pub async fn gigastt_transcribe_meeting<R: Runtime>(
     app: AppHandle<R>,
     meeting_id: String,
 ) -> Result<JobSnapshot, String> {
-    launch_meeting(app, meeting_id, None, None).await
+    launch_meeting(app, meeting_id, None, None, None).await
+}
+
+struct PreparedLaunch {
+    guard: crate::audio::retranscription::RetranscriptionGuard,
+    sidecar: Arc<super::GigasttSidecar>,
+}
+
+/// Import audio directly into a durable meeting and run the accepted Russian
+/// GigaSTT profile. Copying finishes before acceptance, while transcription is
+/// owned by [`PostTranscriptionJobs`] and survives webview navigation/closure.
+#[tauri::command]
+pub async fn gigastt_import_audio<R: Runtime>(
+    app: AppHandle<R>,
+    source_path: String,
+    title: String,
+) -> Result<JobSnapshot, String> {
+    let imports = app
+        .try_state::<PostTranscriptionJobs>()
+        .ok_or("transcription runtime unavailable")?
+        .imports
+        .clone();
+    let task = imports
+        .spawn_owned(move |lease| run_owned_import(app, source_path, title, lease))
+        .map_err(|error| error.to_string())?;
+    task.await
+        .map_err(|_| "native audio import worker failed".to_string())?
+}
+
+async fn run_owned_import<R: Runtime>(
+    app: AppHandle<R>,
+    source_path: String,
+    title: String,
+    lease: ImportWorkLease,
+) -> Result<JobSnapshot, String> {
+    let guard = acquire_job_ownership(&app).await?;
+    let state = app
+        .try_state::<crate::state::AppState>()
+        .ok_or("database unavailable")?;
+    let pool = state.db_manager.pool().clone();
+    let source = PathBuf::from(source_path);
+    let validation_source = source.clone();
+    let validation_lease = lease.clone();
+    let source_info = tokio::task::spawn_blocking(move || {
+        validation_lease
+            .check_active()
+            .map_err(anyhow::Error::new)?;
+        crate::audio::import::validate_audio_file(&validation_source)
+    })
+    .await
+    .map_err(|_| "audio validation worker failed".to_string())?
+    .map_err(|error| error.to_string())?;
+    lease.check_active().map_err(|error| error.to_string())?;
+    // Fail before creating an archive if the accepted GigaSTT runtime is not
+    // available. There is no fallback to the legacy import inference engine.
+    let sidecar = prepare_sidecar(&app).await?;
+    lease.check_active().map_err(|error| error.to_string())?;
+    let base_dir = crate::audio::recording_preferences::get_default_recordings_folder();
+    let copy_cancel = lease.cancellation_token();
+
+    // `block_in_place` makes this potentially long copy non-detachable: task
+    // cancellation is not observed until the atomic archive copy has either
+    // completed or cleaned its staging folder.
+    let mut archive = tokio::task::block_in_place(|| {
+        create_import_archive(
+            &base_dir,
+            &title,
+            &source,
+            source_info.duration_seconds,
+            &copy_cancel,
+        )
+    })
+    .map_err(|error| {
+        format!(
+            "{error}; no GigaSTT retry meeting was created because archived audio is unavailable"
+        )
+    })?;
+    if let Err(error) = lease.check_active() {
+        let _ = discard_unpersisted_archive(&archive);
+        return Err(error.to_string());
+    }
+    if let Err(error) = persist_imported_meeting(&pool, &title, &mut archive).await {
+        if matches!(&error, ImportAudioError::CommitOutcomeUnknown(_)) {
+            return Err(format!(
+                "{error}; archived audio for meeting {} was retained at {} for recovery because the database outcome is unknown",
+                archive.meeting_id,
+                archive.meeting_dir.display()
+            ));
+        }
+        let cleanup = discard_unpersisted_archive(&archive);
+        return Err(match cleanup {
+            Ok(()) => format!("{error}; no imported meeting was persisted"),
+            Err(cleanup_error) => format!(
+                "{error}; no imported meeting was persisted and archive cleanup failed: {cleanup_error}"
+            ),
+        });
+    }
+
+    if let Err(error) = lease.check_active() {
+        let _ = job_state::finish_job(
+            &pool,
+            &archive.meeting_id,
+            &archive.run_id,
+            "cancelled",
+            Some("app_closing"),
+        )
+        .await;
+        return Err(format!(
+            "{error}; imported meeting {} and archived audio were retained for retry",
+            archive.meeting_id
+        ));
+    }
+
+    let meeting_id = archive.meeting_id.clone();
+    let run_id = archive.run_id.clone();
+    let result = launch_meeting(
+        app,
+        archive.meeting_id.clone(),
+        Some(archive.audio_path.clone()),
+        Some(archive.run_id.clone()),
+        Some(PreparedLaunch { guard, sidecar }),
+    )
+    .await;
+    match result {
+        Ok(snapshot) => Ok(snapshot),
+        Err(error) => {
+            let status = if lease.check_active().is_err() {
+                "cancelled"
+            } else {
+                "failed"
+            };
+            let code = if status == "cancelled" {
+                "app_closing"
+            } else {
+                "import_start_failed"
+            };
+            let _ = job_state::finish_job(&pool, &meeting_id, &run_id, status, Some(code)).await;
+            Err(format!(
+                "{error}; imported meeting {meeting_id} and archived audio were retained for retry"
+            ))
+        }
+    }
 }
 
 async fn launch_meeting<R: Runtime>(
@@ -172,6 +323,7 @@ async fn launch_meeting<R: Runtime>(
     meeting_id: String,
     finalized_audio: Option<PathBuf>,
     pending_run: Option<String>,
+    prepared: Option<PreparedLaunch>,
 ) -> Result<JobSnapshot, String> {
     let jobs = app
         .try_state::<PostTranscriptionJobs>()
@@ -179,16 +331,10 @@ async fn launch_meeting<R: Runtime>(
     if jobs.closing.load(Ordering::Acquire) {
         return Err("application is shutting down".into());
     }
-    let guard = crate::audio::retranscription::RetranscriptionGuard::acquire()?;
-    if crate::audio::recording_commands::is_recording_now() {
-        return Err("stop recording before re-transcribing".into());
-    }
-    // The shared guard proves the previous task has released its transcript
-    // ownership. Await its retained JoinHandle rather than detaching it.
-    let previous = jobs.active.lock().unwrap_or_else(|e| e.into_inner()).take();
-    if let Some(previous) = previous {
-        let _ = previous.handle.await;
-    }
+    let (guard, prepared_sidecar) = match prepared {
+        Some(prepared) => (prepared.guard, Some(prepared.sidecar)),
+        None => (acquire_job_ownership(&app).await?, None),
+    };
     let state = app
         .try_state::<crate::state::AppState>()
         .ok_or("database unavailable")?;
@@ -214,18 +360,10 @@ async fn launch_meeting<R: Runtime>(
         .map_err(|_| "audio lookup worker failed")?
         .map_err(|_| "meeting audio is unavailable")?,
     };
-    let sidecar_state = app
-        .try_state::<GigasttSidecarState>()
-        .ok_or("GigaSTT runtime unavailable")?;
-    super::model_commands::require_pinned_models(&app).await?;
-    let sidecar = sidecar_state.manager(&app).await?;
-    // Retry is explicit. Reset a failed lifecycle without an endless auto-restart.
-    if matches!(
-        sidecar.status().await,
-        super::SidecarStatus::Failed | super::SidecarStatus::NotInstalled
-    ) {
-        sidecar.shutdown().await.map_err(|e| e.to_string())?;
-    }
+    let sidecar = match prepared_sidecar {
+        Some(sidecar) => sidecar,
+        None => prepare_sidecar(&app).await?,
+    };
     let was_reserved = pending_run.is_some();
     let run_id = pending_run.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     // Acquiring the shared guard and joining its previous owner proves that
@@ -377,6 +515,46 @@ async fn launch_meeting<R: Runtime>(
     }
     let _ = start.send(());
     Ok(snapshot)
+}
+
+async fn acquire_job_ownership<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<crate::audio::retranscription::RetranscriptionGuard, String> {
+    let jobs = app
+        .try_state::<PostTranscriptionJobs>()
+        .ok_or("transcription runtime unavailable")?;
+    if jobs.closing.load(Ordering::Acquire) {
+        return Err("application is shutting down".into());
+    }
+    let guard = crate::audio::retranscription::RetranscriptionGuard::acquire()?;
+    if crate::audio::recording_commands::is_recording_now() {
+        return Err("stop recording before re-transcribing".into());
+    }
+    // The shared guard proves the previous task has released its transcript
+    // ownership. Await its retained JoinHandle rather than detaching it.
+    let previous = jobs.active.lock().unwrap_or_else(|e| e.into_inner()).take();
+    if let Some(previous) = previous {
+        let _ = previous.handle.await;
+    }
+    Ok(guard)
+}
+
+async fn prepare_sidecar<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<Arc<super::GigasttSidecar>, String> {
+    let sidecar_state = app
+        .try_state::<GigasttSidecarState>()
+        .ok_or("GigaSTT runtime unavailable")?;
+    super::model_commands::require_pinned_models(app).await?;
+    let sidecar = sidecar_state.manager(app).await?;
+    // Retry is explicit. Reset a failed lifecycle without an endless auto-restart.
+    if matches!(
+        sidecar.status().await,
+        super::SidecarStatus::Failed | super::SidecarStatus::NotInstalled
+    ) {
+        sidecar.shutdown().await.map_err(|e| e.to_string())?;
+    }
+    Ok(sidecar)
 }
 
 #[tauri::command]

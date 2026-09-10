@@ -22,6 +22,14 @@ gigastt-test-fixtures = []
 name = "post_transcription_job_state"
 path = "../../frontend/src-tauri/tests/post_transcription_job_state.rs"
 
+[[test]]
+name = "post_transcription_import_audio"
+path = "../../frontend/src-tauri/tests/post_transcription_import_audio.rs"
+
+[[test]]
+name = "post_transcription_command_contract"
+path = "../../frontend/src-tauri/tests/post_transcription_command_contract.rs"
+
 [lib]
 name = "app_lib"
 path = "lib.rs"

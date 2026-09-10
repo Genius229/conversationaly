@@ -185,11 +185,11 @@ export function isGigasttJobActive(snapshot: GigasttJobSnapshot | null): boolean
 }
 
 export function canAutomaticallyPostProcess(
-  cameFromRecording: boolean,
+  automaticPostProcessingRequested: boolean,
   snapshot: GigasttJobSnapshot | null | undefined,
   transcriptReady: boolean = false,
 ): boolean {
-  if (!cameFromRecording || snapshot === undefined) return false;
+  if (!automaticPostProcessingRequested || snapshot === undefined) return false;
   return snapshot === null || (snapshot.state === 'ready' && transcriptReady);
 }
 

@@ -6,6 +6,8 @@ on:
     branches: [feat/gigastt-post-transcription]
     paths:
       - 'frontend/src-tauri/src/audio/post_transcription/**'
+      - 'frontend/src-tauri/src/onboarding*.rs'
+      - 'frontend/src-tauri/src/lib.rs'
       - 'frontend/src-tauri/tests/**'
       - 'frontend/src-tauri/migrations/**'
       - 'tools/gigastt-contract-tests/**'
@@ -13,6 +15,8 @@ on:
   pull_request:
     paths:
       - 'frontend/src-tauri/src/audio/post_transcription/**'
+      - 'frontend/src-tauri/src/onboarding*.rs'
+      - 'frontend/src-tauri/src/lib.rs'
       - 'frontend/src-tauri/tests/**'
       - 'frontend/src-tauri/migrations/**'
       - 'tools/gigastt-contract-tests/**'
