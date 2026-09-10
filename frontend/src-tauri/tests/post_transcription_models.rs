@@ -7,7 +7,7 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc, Mutex,
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
@@ -551,7 +551,7 @@ async fn download_progress_is_throttled_but_always_finishes_with_exact_bytes() {
 
     installer
         .install(CancellationToken::new(), move |event| {
-            captured.lock().unwrap().push(event);
+            captured.lock().unwrap().push((Instant::now(), event));
         })
         .await
         .unwrap();
@@ -559,13 +559,34 @@ async fn download_progress_is_throttled_but_always_finishes_with_exact_bytes() {
     let progress = progress.lock().unwrap();
     let downloads: Vec<_> = progress
         .iter()
-        .filter(|event| event.phase == ModelInstallPhase::Downloading)
+        .filter(|(_, event)| event.phase == ModelInstallPhase::Downloading)
         .collect();
     assert!(
-        downloads.len() <= 10,
-        "download events: {}",
-        downloads.len()
+        downloads.len() >= 2,
+        "expected initial and exact final download events"
     );
-    assert_eq!(downloads.last().unwrap().bytes_done, bytes.len() as u64);
-    assert!(downloads.last().unwrap().bytes_total.is_none());
+    assert_eq!(downloads.first().unwrap().1.bytes_done, 0);
+    let elapsed = downloads
+        .last()
+        .unwrap()
+        .0
+        .duration_since(downloads.first().unwrap().0);
+    let throttle_interval = Duration::from_millis(100);
+    let timed_slots = elapsed.as_nanos().div_ceil(throttle_interval.as_nanos());
+    let max_events = usize::try_from(timed_slots)
+        .unwrap_or(usize::MAX)
+        .saturating_add(2); // Initial and mandatory exact final events are unthrottled.
+    assert!(
+        downloads.len() <= max_events,
+        "{} download events over {elapsed:?}, maximum {max_events}",
+        downloads.len(),
+    );
+    for pair in downloads[1..downloads.len() - 1].windows(2) {
+        assert!(
+            pair[1].0.duration_since(pair[0].0) >= throttle_interval,
+            "intermediate download events were emitted less than {throttle_interval:?} apart"
+        );
+    }
+    assert_eq!(downloads.last().unwrap().1.bytes_done, bytes.len() as u64);
+    assert!(downloads.last().unwrap().1.bytes_total.is_none());
 }

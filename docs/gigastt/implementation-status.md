@@ -116,7 +116,13 @@ assertion exposed by run `34432100449`. Integration run `34463264459` (`119b77e`
 passed Ubuntu but exposed a Windows test-fixture race: a cancelled readiness
 probe reset its socket, and fake-server `expect()` incorrectly crashed the
 process. The test-only fix tolerates disconnected writes, with a deterministic
-BrokenPipe regression. Updated 89-test Linux suite passes; Windows rerun pending.
+BrokenPipe regression. Rerun `34464996947` confirmed all Windows lifecycle tests
+pass, then exposed a model-progress test's fixed wall-time assumption: Windows
+timer granularity stretched 120 short sleeps, allowing more legitimate 100 ms
+updates. That assertion now uses actual elapsed time and checks intermediate
+event spacing, while retaining exact initial/final byte assertions. Production
+supervisor/installer behavior is unchanged. Updated 89-test Linux suite and
+Clippy pass; Windows rerun pending.
 
 Initial run `34429102821` failed workflow validation because `runner.temp`
 is not permitted at job env scope; fixed with step initialization. Run
