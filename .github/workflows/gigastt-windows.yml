@@ -25,13 +25,17 @@ jobs:
     env:
       GIGASTT_SOURCE_DIR: ${{ github.workspace }}\.gigastt-src
       GIGASTT_RUNTIME_DIR: ${{ github.workspace }}\frontend\src-tauri\binaries\gigastt-runtime
-      GIGASTT_MODEL_DIR: ${{ runner.temp }}\gigastt-model-v2.18.0
-      GIGASTT_EVIDENCE_DIR: ${{ runner.temp }}\gigastt-windows-evidence
       GIGASTT_MANIFEST: ${{ github.workspace }}\scripts\gigastt\windows-resources.json
 
     steps:
       - name: Checkout Conversationaly
         uses: actions/checkout@v4
+
+      - name: Set runner-local directories
+        shell: pwsh
+        run: |
+          "GIGASTT_MODEL_DIR=$env:RUNNER_TEMP\gigastt-model-v2.18.0" >> $env:GITHUB_ENV
+          "GIGASTT_EVIDENCE_DIR=$env:RUNNER_TEMP\gigastt-windows-evidence" >> $env:GITHUB_ENV
 
       - name: Validate committed pins
         shell: pwsh
