@@ -360,10 +360,12 @@ async fn readiness_probe_timeout_does_not_shorten_the_returned_job_client_timeou
 #[tokio::test]
 async fn busy_updates_cannot_resurrect_a_failed_supervisor_state() {
     let temp = TempDir::new().unwrap();
-    control(&temp, "fake-exit-after-ms", "100,100");
     let manager = GigasttSidecar::new(test_config(&temp, None)).unwrap();
     manager.ensure_ready().await.unwrap();
     manager.set_busy(true).await.unwrap();
+    // Arm both crashes only after the Ready -> Busy state under test exists.
+    // A Windows cold spawn can legitimately consume the old 100 ms window.
+    control(&temp, "fake-exit-after-ms", "100,100");
 
     let updater = {
         let manager = manager.clone();

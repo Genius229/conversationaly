@@ -49,13 +49,15 @@ jobs:
         run: cargo test --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked --features gigastt-test-fixtures --no-fail-fast
       - name: Verify pinned installer ordering and configuration contracts
         run: python -m unittest discover -s frontend/src-tauri/installer/tests -v
-      - name: Repeat Windows cancelled-probe lifecycle regression
+      - name: Repeat Windows lifecycle regressions
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           for ($attempt = 1; $attempt -le 20; $attempt++) {
-            Write-Host "Cancelled-probe regression $attempt/20"
+            Write-Host "Lifecycle regressions $attempt/20"
             cargo test --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked --features gigastt-test-fixtures --test gigastt_sidecar readiness_timeout_fails_and_reaps_the_child -- --exact
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            cargo test --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked --features gigastt-test-fixtures --test gigastt_sidecar busy_updates_cannot_resurrect_a_failed_supervisor_state -- --exact
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
       - name: Clippy

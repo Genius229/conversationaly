@@ -311,8 +311,6 @@ fn main() {
         .map(Duration::from_millis)
         .unwrap_or_default();
     let never_ready = model_dir.join("fake-never-ready").exists();
-    let exit_after =
-        per_launch_millis(&model_dir, "fake-exit-after-ms", launch).map(Duration::from_millis);
     let response_delay = per_launch_millis(&model_dir, "fake-response-delay-ms", launch)
         .map(Duration::from_millis)
         .unwrap_or_default();
@@ -320,10 +318,19 @@ fn main() {
         .map(Duration::from_millis)
         .unwrap_or_default();
     let started = Instant::now();
+    // Tests may create this control only after readiness and another state
+    // transition. Its first observation is the arming instant; controls that
+    // already exist retain the original process-start-relative behavior.
+    let mut exit_after = per_launch_millis(&model_dir, "fake-exit-after-ms", launch)
+        .map(|millis| (started, Duration::from_millis(millis)));
     let mut job_polls = 0_usize;
 
     loop {
-        if exit_after.is_some_and(|limit| started.elapsed() >= limit) {
+        if exit_after.is_none() {
+            exit_after = per_launch_millis(&model_dir, "fake-exit-after-ms", launch)
+                .map(|millis| (Instant::now(), Duration::from_millis(millis)));
+        }
+        if exit_after.is_some_and(|(armed, limit)| armed.elapsed() >= limit) {
             std::process::exit(42);
         }
 
