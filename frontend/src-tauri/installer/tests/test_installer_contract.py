@@ -164,6 +164,13 @@ class InstallerContractTests(unittest.TestCase):
         self.assertNotIn("MB_ABORTRETRYIGNORE", hooks)
         self.assertNotIn("taskkill", hooks.lower())
         self.assertNotIn("/IM", hooks)
+        self.assertIn(
+            "$WINDIR\\Sysnative\\WindowsPowerShell\\v1.0\\powershell.exe", hooks
+        )
+        self.assertIn(
+            "$SYSDIR\\WindowsPowerShell\\v1.0\\powershell.exe", hooks
+        )
+        self.assertIn("IfFileExists", hooks)
         self.assertIn("SetErrorLevel $", hooks)
         self.assertIn("${Silent}", hooks)
         self.assertIn('"Preflight"', hooks)
@@ -180,6 +187,9 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("--installer-quit", helper)
         self.assertIn("--installer-target", helper)
         self.assertIn("[StringComparison]::OrdinalIgnoreCase", helper)
+        self.assertIn('$extendedUncPrefix = "\\\\?\\UNC\\"', helper)
+        self.assertIn('$extendedPrefix = "\\\\?\\"', helper)
+        self.assertIn("$fullPath.Substring(4)", helper)
         self.assertIn("[IO.FileShare]::None", helper)
         self.assertIn("[IO.FileAttributes]::ReadOnly", helper)
         self.assertIn("Get-ChildItem -LiteralPath $InstallRoot -Directory -Recurse -Force", helper)

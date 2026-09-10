@@ -10,7 +10,12 @@
   File /oname=$PLUGINSDIR\gigastt-installer-preflight.ps1 "${CONVERSATIONALY_INSTALLER_HOOK_DIR}\gigastt-installer-preflight.ps1"
 
   conversationaly_${UNIQUE_ID}_retry:
-    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\gigastt-installer-preflight.ps1" -Mode ${MODE} -InstallDir "$INSTDIR" -MainBinaryName "${MAINBINARYNAME}.exe" ${PAYLOAD}'
+    ; NSIS is a 32-bit process. On 64-bit Windows, Sysnative bypasses WOW64
+    ; redirection so Get-Process.Path can inspect the 64-bit installed app.
+    StrCpy $7 "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+    IfFileExists "$7" +2 0
+      StrCpy $7 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
+    nsExec::ExecToStack '"$7" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\gigastt-installer-preflight.ps1" -Mode ${MODE} -InstallDir "$INSTDIR" -MainBinaryName "${MAINBINARYNAME}.exe" ${PAYLOAD}'
     Pop $8
     Pop $9
 

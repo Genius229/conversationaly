@@ -42,7 +42,16 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Stop"
 
 function Get-NormalizedPath([string]$Path) {
-    return [IO.Path]::GetFullPath($Path).TrimEnd([char[]]@(92, 47))
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $extendedUncPrefix = "\\?\UNC\"
+    $extendedPrefix = "\\?\"
+    if ($fullPath.StartsWith($extendedUncPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        $fullPath = "\\" + $fullPath.Substring(8)
+    }
+    elseif ($fullPath.StartsWith($extendedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        $fullPath = $fullPath.Substring(4)
+    }
+    return $fullPath.TrimEnd([char[]]@(92, 47))
 }
 
 function Test-SamePath([string]$Left, [string]$Right) {
