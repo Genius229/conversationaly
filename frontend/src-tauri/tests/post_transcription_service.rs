@@ -558,16 +558,18 @@ async fn stalled_job_hits_deadline_cancels_remote_and_restores_ready() {
         .await
         .unwrap_err();
 
-    assert!(
-        matches!(error, PostTranscriptionError::PollDeadline),
-        "expected PollDeadline, got {error:?}"
-    );
     let requests = fs::read_to_string(fixture.model_dir.join("fake-requests")).unwrap_or_default();
     let transport = fs::read_to_string(fixture.model_dir.join("fake-transport-diagnostics"))
         .unwrap_or_default();
+    let sidecar = fixture.sidecar.snapshot().await;
+    let diagnostics = fixture.sidecar.diagnostics().await;
+    assert!(
+        matches!(error, PostTranscriptionError::PollDeadline),
+        "expected PollDeadline, got {error:?}; requests={requests:?}; transport={transport:?}; sidecar={sidecar:?}; diagnostics={diagnostics:?}"
+    );
     assert!(
         fixture.model_dir.join("fake-cancelled-jobs").exists(),
-        "known job cancellation was not observed; requests={requests:?}; transport={transport:?}"
+        "known job cancellation was not observed; requests={requests:?}; transport={transport:?}; sidecar={sidecar:?}; diagnostics={diagnostics:?}"
     );
     assert_eq!(draft(&fixture.pool).await.0, "draft survives");
     assert_eq!(fixture.sidecar.status().await, SidecarStatus::Ready);
