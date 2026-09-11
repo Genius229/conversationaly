@@ -10,18 +10,18 @@ Use the `conversationaly-gigastt-windows-unsigned-dev` artifact from a successfu
 `GigaSTT desktop Windows check` or `GigaSTT installer repackage and acceptance`
 run on `feat/gigastt-post-transcription`.
 Record the run URL and commit SHA. Do not use an artifact from a failed or
-cancelled run. The build is CPU-only, with GigaSTT pinned to 2.18.0.
+cancelled run. The build is CPU-only, with GigaSTT pinned to 2.21.0.
 
-Latest verified installer (OGG/Opus and M4A codec fallback, retaining Home/installer fixes):
-[run 34536182311](https://github.com/Genius229/conversationaly/actions/runs/34536182311),
-full native/desktop build and installer commit `6e3f417`.
-[Download artifact 10176121731](https://github.com/Genius229/conversationaly/actions/runs/34536182311/artifacts/10176121731)
-(GitHub login required; artifacts expire after 14 days).
-Installer: `Conversationaly GigaSTT Dev_1.4.1_x64-setup.exe`.
-SHA256: `c82b2731373d3c8ab0a46d553a3d2ed126b9b9377162522fe7d36ef5629ff0f6`.
-All nine real installation/upgrade cases and ten codec tests passed. See
-`import-codec-verification.md` and `home-installer-verification.md` for evidence
-and remaining gates.
+Latest verified installer (punctuation/casing, GigaSTT 2.21.0, retaining codec and installer fixes):
+[run 34549490986](https://github.com/Genius229/conversationaly/actions/runs/34549490986),
+full native/desktop build and installer commit `b43cfd6`.
+[Public EXE download](https://github.com/Genius229/conversationaly/releases/download/gigastt-desktop-v1.4.2-preview.1/Conversationaly-GigaSTT-1.4.2-x64-setup.exe)
+(no GitHub login required; anonymous download/hash verified).
+Installer: `Conversationaly-GigaSTT-1.4.2-x64-setup.exe`.
+SHA256: `e1d012d3a79a4084cd32e5f984f9b6277b61f0b92faf8e2c70276ad7a3b988c0`.
+All nine real installation/upgrade cases, ten codec tests and both native
+canonical text/casing checks passed. See `formatted-transcripts-verification.md`
+and `home-installer-verification.md` for evidence and remaining gates.
 
 The CI overlay uses `Conversationaly GigaSTT Dev` and identifier
 `com.conversationaly.gigastt-dev`: it has a separate install/data profile from

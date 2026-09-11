@@ -24,7 +24,7 @@
 - [x] Verify latest stable source, Windows/CPU API/flag compatibility and identical model hashes. Official archive lacks DLLs, so retain the full source-build/runtime-inventory pipeline.
 - [x] Implement/test canonical text alignment for punctuation, case, ITN, repeated words, deleted fillers and ambiguous cross-segment rewrites; preserve timed bounds and conservative speaker labels.
 - [x] Remove all cancelled native-diarization work; retain only version/asset-layout/serial-window updates.
-- [ ] Update build pins, application version 1.4.2 and truthful UI version labels. Include pinned upstream LICENSE/NOTICE in the installer.
-- [ ] Independently review scoped code; run complete headless/Clippy, frontend/type/build/browser, codec and Windows native/installer gates.
-- [ ] Publish a public GitHub prerelease with EXE and SHA256, verify anonymous direct download and record immutable release/build provenance.
-- [ ] Finalize docs and clean commit/push; never commit generated audio, transcripts or binary artifacts.
+- [x] Update build pins, application version 1.4.2 and truthful UI version labels. Include pinned upstream LICENSE/NOTICE in the installer.
+- [x] Independently review scoped code; run complete headless/Clippy, frontend/type/build/browser, codec and Windows native/installer gates.
+- [x] Publish a public GitHub prerelease with EXE and SHA256, verify anonymous direct download and record immutable release/build provenance.
+- [x] Finalize docs and clean commit/push; never commit generated audio, transcripts or binary artifacts.

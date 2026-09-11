@@ -7,6 +7,21 @@ GigaSTT native inference smoke, Windows/Ubuntu contract matrix, Clippy and
 frontend checks. UI/backend reviews approved. Remaining acceptance boundaries
 are listed below; this is an unsigned development build, not a production release.
 
+**Latest public preview: 1.4.2 / GigaSTT 2.21.0.** Punctuation and casing now
+come from canonical `result.text`; native diarization was cancelled and is not
+included. Existing model files are reused. For old recordings, explicitly
+re-transcribe to apply formatting without silently overwriting manual edits.
+[Download EXE without login](https://github.com/Genius229/conversationaly/releases/download/gigastt-desktop-v1.4.2-preview.1/Conversationaly-GigaSTT-1.4.2-x64-setup.exe).
+Full native/desktop/installer run **34549490986 PASS** (`b43cfd6`), artifact
+**10180866354**: two real formatting checks, ten bundled-FFmpeg codec tests,
+nine installation/upgrade scenarios. Final contracts **34551115254 PASS**
+(`859d005`): Ubuntu 129 / Windows 123, 80 Windows stress repetitions, Clippy.
+Later changes are test-only; executable inputs are identical. Anonymous EXE
+download matches the tested SHA256. See `formatted-transcripts-verification.md`
+and `evidence/windows-formatted-transcripts-2026-09-11.json`.
+
+The entries below retain historical verification/build provenance.
+
 Catalog usability follow-up: GigaSTT download/repair is now available directly
 in **Settings → Transcription → On-device models**, with shared meeting-panel
 state, search and Installed only. Local UI/browser checks and independent review
