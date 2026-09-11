@@ -541,10 +541,6 @@ async fn foreign_meeting_folder_is_rejected_before_decode_or_sidecar_start() {
 async fn stalled_job_hits_deadline_cancels_remote_and_restores_ready() {
     let fixture = Fixture::new(true).await;
     write_control(&fixture.model_dir, "fake-job-statuses", "processing:9");
-    // The production Axum server handles cancellation concurrently. This fake
-    // is intentionally single-threaded, so bound an abandoned near-deadline
-    // status connection below the service's 150 ms cancellation request bound.
-    write_control(&fixture.model_dir, "fake-request-read-timeout-ms", "40");
     let service = PostTranscriptionService::new(fixture.pool.clone(), fixture.sidecar.clone())
         .with_limits(
             Duration::from_millis(10),

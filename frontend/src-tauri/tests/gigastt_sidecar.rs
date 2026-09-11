@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write;
 use std::net::TcpListener as StdTcpListener;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -174,6 +175,38 @@ async fn starts_with_verified_v221_flags_on_the_same_random_loopback_port() {
     assert_eq!(manager.status().await, SidecarStatus::Ready);
     manager.shutdown().await.unwrap();
     assert_eq!(manager.status().await, SidecarStatus::NotInstalled);
+}
+
+#[tokio::test]
+async fn incomplete_header_does_not_block_job_status_and_delete() {
+    let temp = TempDir::new().unwrap();
+    let manager = GigasttSidecar::new(test_config(&temp, None)).unwrap();
+    let client = manager.ensure_ready().await.unwrap();
+    let port = manager.snapshot().await.port.unwrap();
+
+    let mut abandoned = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    abandoned
+        .write_all(b"GET /v1/jobs/job_1 HTTP/1.1\r\nHost:")
+        .unwrap();
+    // Let the server accept the deliberately incomplete request first. A
+    // serial header reader would now head-of-line block both calls below.
+    tokio::time::sleep(Duration::from_millis(30)).await;
+
+    let started = Instant::now();
+    let status = client.get_job("job_1").await.unwrap();
+    assert_eq!(
+        status.status,
+        app_lib::audio::post_transcription::GigasttJobStatus::Processing
+    );
+    client.cancel_job("job_1").await.unwrap();
+    assert!(
+        started.elapsed() < Duration::from_millis(500),
+        "ready requests were head-of-line blocked by an incomplete header"
+    );
+    assert!(model_dir(&temp).join("fake-cancelled-jobs").exists());
+
+    drop(abandoned);
+    manager.shutdown().await.unwrap();
 }
 
 #[tokio::test]

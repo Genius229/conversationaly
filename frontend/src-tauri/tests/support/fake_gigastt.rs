@@ -6,8 +6,9 @@
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -142,6 +143,26 @@ struct Request {
     method: String,
     target: String,
     body: Vec<u8>,
+}
+
+type ReadRequestResult = (TcpStream, io::Result<Request>);
+
+/// Read each accepted connection independently, like Axum does. The main fake
+/// loop still applies responses and mutates `job_polls` sequentially, but an
+/// abandoned partial request can no longer head-of-line block a later DELETE.
+fn spawn_request_reader(
+    mut stream: TcpStream,
+    timeout: Duration,
+    ready: Sender<ReadRequestResult>,
+) -> io::Result<()> {
+    stream.set_read_timeout(Some(timeout))?;
+    thread::Builder::new()
+        .name("fake-gigastt-request-reader".into())
+        .spawn(move || {
+            let request = read_request(&mut stream);
+            let _ = ready.send((stream, request));
+        })
+        .map(|_| ())
 }
 
 /// Read the complete fixed-length request. Prepared meeting WAVs are normally
@@ -334,6 +355,8 @@ fn main() {
     let mut exit_after = per_launch_millis(&model_dir, "fake-exit-after-ms", launch)
         .map(|millis| (started, Duration::from_millis(millis)));
     let mut job_polls = 0_usize;
+    let (ready_tx, ready_rx): (Sender<ReadRequestResult>, Receiver<ReadRequestResult>) =
+        mpsc::channel();
 
     loop {
         if exit_after.is_none() {
@@ -344,118 +367,123 @@ fn main() {
             std::process::exit(42);
         }
 
-        match listener.accept() {
-            Ok((mut stream, _)) => {
-                let request_read_timeout = control_text(&model_dir, "fake-request-read-timeout-ms")
-                    .and_then(|value| value.trim().parse().ok())
-                    .map(Duration::from_millis)
-                    .unwrap_or(Duration::from_secs(2));
-                if let Err(error) = stream.set_read_timeout(Some(request_read_timeout)) {
-                    fail_fixture(&model_dir, "request_timeout", error.kind());
-                }
-                let request = match read_request(&mut stream) {
-                    Ok(request) => request,
-                    Err(error) => {
-                        handle_peer_error(&model_dir, error);
-                        continue;
+        loop {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    if let Err(error) =
+                        spawn_request_reader(stream, Duration::from_secs(2), ready_tx.clone())
+                    {
+                        fail_fixture(&model_dir, "request_reader_spawn", error.kind());
                     }
-                };
-                append(
-                    &model_dir.join("fake-requests"),
-                    &format!(
-                        "{} {} {}",
-                        request.method,
-                        request.target,
-                        request.body.len()
-                    ),
+                }
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) if is_expected_accept_disconnect(error.kind()) => {
+                    record_transport(&model_dir, "disconnect", "listener_accept", error.kind());
+                }
+                Err(error) => fail_fixture(&model_dir, "listener_accept", error.kind()),
+            }
+        }
+        let (mut stream, request) = match ready_rx.recv_timeout(Duration::from_millis(5)) {
+            Ok(ready) => ready,
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => fail_fixture(
+                &model_dir,
+                "request_reader_channel",
+                io::ErrorKind::BrokenPipe,
+            ),
+        };
+        let request = match request {
+            Ok(request) => request,
+            Err(error) => {
+                handle_peer_error(&model_dir, error);
+                continue;
+            }
+        };
+        append(
+            &model_dir.join("fake-requests"),
+            &format!(
+                "{} {} {}",
+                request.method,
+                request.target,
+                request.body.len()
+            ),
+        );
+        let is_job = request.method == "POST" && request.target.starts_with("/v1/jobs?");
+        if is_job {
+            append(
+                &model_dir.join("fake-upload-lengths"),
+                &request.body.len().to_string(),
+            );
+            append(
+                &model_dir.join("fake-job-request-arrived"),
+                &request.body.len().to_string(),
+            );
+            if model_dir.join("fake-job-response-await-release").exists() {
+                wait_for_control(
+                    &model_dir,
+                    "fake-job-response-release",
+                    Duration::from_secs(5),
                 );
-                let is_job = request.method == "POST" && request.target.starts_with("/v1/jobs?");
-                if is_job {
-                    append(
-                        &model_dir.join("fake-upload-lengths"),
-                        &request.body.len().to_string(),
-                    );
-                    append(
-                        &model_dir.join("fake-job-request-arrived"),
-                        &request.body.len().to_string(),
-                    );
-                    if model_dir.join("fake-job-response-await-release").exists() {
-                        wait_for_control(
-                            &model_dir,
-                            "fake-job-response-release",
-                            Duration::from_secs(5),
-                        );
-                    }
-                }
-                let status_delay = if request.method == "GET" && request.target == "/v1/jobs/job_1"
-                {
-                    control_text(&model_dir, "fake-status-response-delay-ms")
-                        .and_then(|value| value.trim().parse().ok())
-                        .map(Duration::from_millis)
-                } else {
-                    None
-                };
-                thread::sleep(status_delay.unwrap_or(if is_job {
-                    job_response_delay
-                } else {
-                    response_delay
-                }));
-                let ready = !never_ready && started.elapsed() >= ready_delay;
-                let (status, body) = if is_job {
-                    let status = control_text(&model_dir, "fake-submit-http-status")
-                        .and_then(|value| value.trim().parse().ok())
-                        .unwrap_or(202);
-                    let body =
-                        control_text(&model_dir, "fake-submit-response").unwrap_or_else(|| {
-                            r#"{"job_id":"job_1","status":"queued","created_at":1}"#.to_string()
-                        });
-                    (status, body)
-                } else if request.method == "GET" && request.target == "/v1/jobs/job_1" {
-                    let (job_status, percent) = job_status(&model_dir, job_polls);
-                    job_polls += 1;
-                    (
-                        200,
-                        format!(
-                            r#"{{"job_id":"job_1","status":"{job_status}","processed_seconds":1.0,"percent":{percent},"error":"PRIVATE_TRANSCRIPT_PAYLOAD"}}"#
-                        ),
-                    )
-                } else if request.method == "GET" && request.target == "/v1/jobs/job_1/result" {
-                    let status = control_text(&model_dir, "fake-result-http-status")
-                        .and_then(|value| value.trim().parse().ok())
-                        .unwrap_or(200);
-                    let body = control_text(&model_dir, "fake-result.json").unwrap_or_else(|| {
+            }
+        }
+        let status_delay = if request.method == "GET" && request.target == "/v1/jobs/job_1" {
+            control_text(&model_dir, "fake-status-response-delay-ms")
+                .and_then(|value| value.trim().parse().ok())
+                .map(Duration::from_millis)
+        } else {
+            None
+        };
+        thread::sleep(status_delay.unwrap_or(if is_job {
+            job_response_delay
+        } else {
+            response_delay
+        }));
+        let ready = !never_ready && started.elapsed() >= ready_delay;
+        let (status, body) = if is_job {
+            let status = control_text(&model_dir, "fake-submit-http-status")
+                .and_then(|value| value.trim().parse().ok())
+                .unwrap_or(202);
+            let body = control_text(&model_dir, "fake-submit-response").unwrap_or_else(|| {
+                r#"{"job_id":"job_1","status":"queued","created_at":1}"#.to_string()
+            });
+            (status, body)
+        } else if request.method == "GET" && request.target == "/v1/jobs/job_1" {
+            let (job_status, percent) = job_status(&model_dir, job_polls);
+            job_polls += 1;
+            (
+                200,
+                format!(
+                    r#"{{"job_id":"job_1","status":"{job_status}","processed_seconds":1.0,"percent":{percent},"error":"PRIVATE_TRANSCRIPT_PAYLOAD"}}"#
+                ),
+            )
+        } else if request.method == "GET" && request.target == "/v1/jobs/job_1/result" {
+            let status = control_text(&model_dir, "fake-result-http-status")
+                .and_then(|value| value.trim().parse().ok())
+                .unwrap_or(200);
+            let body = control_text(&model_dir, "fake-result.json").unwrap_or_else(|| {
                         r#"{"text":"Финальный текст","words":[{"word":"Финальный","start":0.0,"end":0.5,"confidence":0.95},{"word":"текст","start":0.5,"end":1.0,"confidence":0.94}],"duration":1.0,"segments":[{"start":0.0,"end":1.0,"text":"Финальный текст","words":[{"word":"Финальный","start":0.0,"end":0.5,"confidence":0.95},{"word":"текст","start":0.5,"end":1.0,"confidence":0.94}]}]}"#.to_string()
                     });
-                    (status, body)
-                } else if request.method == "DELETE" && request.target == "/v1/jobs/job_1" {
-                    append(&model_dir.join("fake-cancelled-jobs"), "job_1");
-                    let status = control_text(&model_dir, "fake-cancel-http-status")
-                        .and_then(|value| value.trim().parse().ok())
-                        .unwrap_or(204);
-                    (status, String::new())
-                } else if ready {
-                    (
-                        200,
-                        r#"{"status":"ready","pool_available":1,"pool_total":1}"#.to_string(),
-                    )
-                } else {
-                    (
-                        503,
-                        r#"{"status":"not_ready","reason":"initializing"}"#.to_string(),
-                    )
-                };
-                if let Err(error) = response(&mut stream, status, &body) {
-                    handle_peer_error(&model_dir, error);
-                }
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                thread::sleep(Duration::from_millis(5));
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(error) if is_expected_accept_disconnect(error.kind()) => {
-                record_transport(&model_dir, "disconnect", "listener_accept", error.kind());
-            }
-            Err(error) => fail_fixture(&model_dir, "listener_accept", error.kind()),
+            (status, body)
+        } else if request.method == "DELETE" && request.target == "/v1/jobs/job_1" {
+            append(&model_dir.join("fake-cancelled-jobs"), "job_1");
+            let status = control_text(&model_dir, "fake-cancel-http-status")
+                .and_then(|value| value.trim().parse().ok())
+                .unwrap_or(204);
+            (status, String::new())
+        } else if ready {
+            (
+                200,
+                r#"{"status":"ready","pool_available":1,"pool_total":1}"#.to_string(),
+            )
+        } else {
+            (
+                503,
+                r#"{"status":"not_ready","reason":"initializing"}"#.to_string(),
+            )
+        };
+        if let Err(error) = response(&mut stream, status, &body) {
+            handle_peer_error(&model_dir, error);
         }
     }
 }
@@ -464,10 +492,14 @@ fn main() {
 mod tests {
     use super::{
         error_stage, handle_peer_error, is_expected_accept_disconnect, is_expected_peer_disconnect,
-        read_request, response, staged_io_error,
+        read_request, response, spawn_request_reader, staged_io_error, ReadRequestResult,
     };
+    use std::collections::BTreeSet;
     use std::fs;
     use std::io::{Cursor, Error, ErrorKind, Read, Result, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::mpsc;
+    use std::time::Duration;
 
     struct ResetReader;
 
@@ -487,6 +519,48 @@ mod tests {
         fn flush(&mut self) -> Result<()> {
             Err(Error::new(ErrorKind::BrokenPipe, "client disconnected"))
         }
+    }
+
+    #[test]
+    fn abandoned_partial_connection_does_not_block_ready_get_and_delete() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let (ready_tx, ready_rx) = mpsc::channel::<ReadRequestResult>();
+
+        let mut abandoned = TcpStream::connect(address).unwrap();
+        abandoned
+            .write_all(b"GET /v1/jobs/job_1 HTTP/1.1\r\nHost:")
+            .unwrap();
+        let (abandoned_server, _) = listener.accept().unwrap();
+        spawn_request_reader(abandoned_server, Duration::from_secs(2), ready_tx.clone()).unwrap();
+
+        for request in [
+            b"GET /v1/jobs/job_1 HTTP/1.1\r\nHost: localhost\r\n\r\n".as_slice(),
+            b"DELETE /v1/jobs/job_1 HTTP/1.1\r\nHost: localhost\r\n\r\n".as_slice(),
+        ] {
+            let mut client = TcpStream::connect(address).unwrap();
+            client.write_all(request).unwrap();
+            let (server, _) = listener.accept().unwrap();
+            spawn_request_reader(server, Duration::from_secs(2), ready_tx.clone()).unwrap();
+        }
+
+        let mut observed = BTreeSet::new();
+        for _ in 0..2 {
+            let (_, request) = ready_rx
+                .recv_timeout(Duration::from_millis(500))
+                .expect("complete requests must bypass the abandoned reader");
+            let request = request.unwrap();
+            observed.insert((request.method, request.target));
+        }
+        assert_eq!(
+            observed,
+            BTreeSet::from([
+                ("DELETE".to_string(), "/v1/jobs/job_1".to_string()),
+                ("GET".to_string(), "/v1/jobs/job_1".to_string()),
+            ])
+        );
+
+        drop(abandoned);
     }
 
     #[test]
