@@ -68,6 +68,8 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             cargo test --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked --features gigastt-test-fixtures --test post_transcription_service cancellation_during_submission_waits_for_job_id_then_cancels_it -- --exact
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            cargo test --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked --features gigastt-test-fixtures --test post_transcription_service stalled_job_hits_deadline_cancels_remote_and_restores_ready -- --exact
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
       - name: Clippy
         run: cargo clippy --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked --features gigastt-test-fixtures --all-targets -- -D warnings
