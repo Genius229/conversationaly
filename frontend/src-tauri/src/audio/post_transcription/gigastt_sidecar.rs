@@ -1,4 +1,4 @@
-//! Managed lifecycle for the bundled GigaSTT 2.18.0 HTTP sidecar.
+//! Managed lifecycle for the bundled GigaSTT 2.21.0 HTTP sidecar.
 //!
 //! This module deliberately has no Tauri dependency. The native adapter
 //! resolves resource/app-data paths and supplies them through
@@ -26,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 use super::{GigasttClient, ReadinessStatus};
 
 /// Source version whose CLI contract is encoded by [`server_arguments`].
-pub const PINNED_GIGASTT_VERSION: &str = "2.18.0";
+pub const PINNED_GIGASTT_VERSION: &str = "2.21.0";
 
 const LOOPBACK_HOST: &str = "127.0.0.1";
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(120);
@@ -394,7 +394,7 @@ impl GigasttSidecar {
     }
 
     /// Stop, terminate within a bound, and wait for child reaping. GigaSTT
-    /// 2.18.0 has no HTTP/stdin shutdown endpoint. Unix uses its SIGTERM path;
+    /// 2.21.0 has no HTTP/stdin shutdown endpoint. Unix uses its SIGTERM path;
     /// Windows truthfully uses bounded force/reap rather than mismatched
     /// CTRL_BREAK. A later explicit `ensure_ready` starts a fresh lifecycle.
     pub async fn shutdown(&self) -> Result<(), SidecarError> {
@@ -1074,6 +1074,8 @@ fn server_arguments(model_dir: &Path, port: u16) -> Vec<std::ffi::OsString> {
         "1".into(),
         "--batch-pool-size".into(),
         "0".into(),
+        "--file-window-concurrency".into(),
+        "1".into(),
         "--enable-jobs".into(),
         "--shutdown-drain-secs".into(),
         SHUTDOWN_DRAIN_SECS.into(),

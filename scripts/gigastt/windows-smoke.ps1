@@ -8,6 +8,7 @@ param(
     [string]$VadModelDir,
     [string]$BaseUrl = "http://127.0.0.1:9876",
     [string]$EvidenceDir = (Join-Path $env:TEMP "gigastt-windows-smoke"),
+    [string]$RawResultPath = "",
     [int]$StartupTimeoutSeconds = 180,
     [int]$JobTimeoutSeconds = 180,
     [int]$RequestTimeoutSeconds = 15,
@@ -180,7 +181,7 @@ try {
     }
 
     $health = Invoke-RestMethod -Uri "$BaseUrl/health" -Method Get -TimeoutSec $RequestTimeoutSeconds
-    if ($health.status -ne "ok" -or $health.version -ne "2.18.0" -or $health.variant -ne "rnnt") {
+    if ($health.status -ne "ok" -or $health.version -ne "2.21.0" -or $health.variant -ne "rnnt") {
         throw "Unexpected /health identity"
     }
     if ($health.punctuation -ne $true -or $health.itn -ne $true) {
@@ -234,6 +235,11 @@ try {
 
     $result = Invoke-RestMethod -Uri "$BaseUrl/v1/jobs/$jobId/result" -Method Get -TimeoutSec $RequestTimeoutSeconds
     $text = [string]$result.text
+    if (-not [string]::IsNullOrWhiteSpace($RawResultPath)) {
+        # Caller keeps this outside the uploaded evidence directory. It is fed
+        # into the real desktop importer to verify formatting without logging text.
+        $result | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $RawResultPath -Encoding utf8NoBOM
+    }
     if ([string]::IsNullOrWhiteSpace($text) -or $text -notmatch "[А-Яа-яЁё]") {
         throw "Transcription text is empty or has no Cyrillic characters"
     }

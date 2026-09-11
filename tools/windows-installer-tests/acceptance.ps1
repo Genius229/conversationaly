@@ -130,6 +130,16 @@ function Assert-Runtime {
     foreach ($binary in $installedBinaries) {
         if (-not $names.ContainsKey($binary.Name)) { throw "Runtime binary not covered by inventory: $($binary.Name)" }
     }
+    # Older regression artifacts did not carry notice inventory. New builds
+    # require it in their build gate and must install the identical files.
+    if ($script:inventory.PSObject.Properties.Name -contains 'noticeFiles') {
+        if (@($script:inventory.noticeFiles).Count -ne 2) { throw 'Incomplete notice inventory' }
+        foreach ($notice in $script:inventory.noticeFiles) {
+            if ($notice.name -notin @('GIGASTT-LICENSE.txt', 'GIGASTT-NOTICE.txt')) { throw 'Unexpected notice path' }
+            $path = Join-Path $install (Join-Path 'gigastt' $notice.name)
+            if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $notice.sha256) { throw "Installed notice mismatch: $($notice.name)" }
+        }
+    }
 }
 
 try {

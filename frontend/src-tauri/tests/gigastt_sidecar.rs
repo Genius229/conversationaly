@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use app_lib::audio::post_transcription::{
     DiagnosticKind, GigasttSidecar, GigasttSidecarConfig, SidecarError, SidecarStatus,
-    SubmitJobOptions,
+    SubmitJobOptions, PINNED_GIGASTT_VERSION,
 };
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -105,7 +105,8 @@ fn reserve_port() -> u16 {
 }
 
 #[tokio::test]
-async fn starts_with_verified_v218_flags_on_the_same_random_loopback_port() {
+async fn starts_with_verified_v221_flags_on_the_same_random_loopback_port() {
+    assert_eq!(PINNED_GIGASTT_VERSION, "2.21.0");
     let temp = TempDir::new().unwrap();
     control(&temp, "fake-ready-delay-ms", "80");
     let manager = GigasttSidecar::new(test_config(&temp, None)).unwrap();
@@ -156,6 +157,8 @@ async fn starts_with_verified_v218_flags_on_the_same_random_loopback_port() {
         "1".to_string(),
         "--batch-pool-size".to_string(),
         "0".to_string(),
+        "--file-window-concurrency".to_string(),
+        "1".to_string(),
         "--enable-jobs".to_string(),
         "--shutdown-drain-secs".to_string(),
         "1".to_string(),

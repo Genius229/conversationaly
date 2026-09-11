@@ -204,7 +204,7 @@ export function GigasttPanel({
                 : state.modelStatus === null
                   ? 'Checking local files'
                   : modelReady
-                    ? `Ready · v${state.modelStatus.version}`
+                    ? 'Ready'
                     : `${modelProblemCount(state.modelStatus)} file(s) missing or damaged`}
             </span>
           </div>

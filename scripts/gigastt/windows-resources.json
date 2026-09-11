@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
   "gigastt": {
-    "version": "2.18.0",
+    "version": "2.21.0",
     "sourceRepository": "https://github.com/ekhodzitsky/gigastt.git",
-    "sourceTag": "v2.18.0",
-    "sourceCommit": "b4f7531b5e54af69e4766bb36c14cc6745e452b2"
+    "sourceTag": "v2.21.0",
+    "sourceCommit": "5289e8a6b3a67217711e6b5cba6c2f19dec3c5eb"
   },
   "toolchain": {
-    "rust": "1.88.0",
+    "rust": "1.94.0",
     "protoc": "30.2",
     "target": "x86_64-pc-windows-msvc"
   },

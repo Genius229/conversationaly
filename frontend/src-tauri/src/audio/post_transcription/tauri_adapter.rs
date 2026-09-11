@@ -10,6 +10,7 @@ use tokio::sync::Mutex;
 use super::gigastt_sidecar::{GigasttSidecar, GigasttSidecarConfig, SidecarStatus};
 
 pub use super::gigastt_sidecar::PINNED_GIGASTT_VERSION as GIGASTT_VERSION;
+pub use super::model_install::PINNED_MODEL_VERSION as GIGASTT_MODEL_LAYOUT_VERSION;
 
 pub fn model_directory<R: Runtime>(app: &AppHandle<R>) -> Result<std::path::PathBuf, String> {
     Ok(app
@@ -18,7 +19,9 @@ pub fn model_directory<R: Runtime>(app: &AppHandle<R>) -> Result<std::path::Path
         .map_err(|_| "GigaSTT app data directory unavailable")?
         .join("models")
         .join("gigastt")
-        .join(GIGASTT_VERSION))
+        // GigaSTT 2.21 uses the same pinned eight-file model contract as 2.18.
+        // Reuse the already verified directory instead of forcing a redownload.
+        .join(GIGASTT_MODEL_LAYOUT_VERSION))
 }
 
 #[derive(Default)]

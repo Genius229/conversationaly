@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   native-build-smoke:
-    name: GigaSTT v2.18.0 Windows x64 CPU
+    name: GigaSTT v2.21.0 Windows x64 CPU
     runs-on: windows-latest
     timeout-minutes: 90
     env:
@@ -43,9 +43,9 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $manifest = Get-Content -LiteralPath $env:GIGASTT_MANIFEST -Raw | ConvertFrom-Json
-          if ($manifest.gigastt.version -ne "2.18.0") { throw "Unexpected GigaSTT version pin" }
-          if ($manifest.gigastt.sourceCommit -ne "b4f7531b5e54af69e4766bb36c14cc6745e452b2") { throw "Unexpected source commit pin" }
-          if ($manifest.toolchain.rust -ne "1.88.0") { throw "Unexpected Rust pin" }
+          if ($manifest.gigastt.version -ne "2.21.0") { throw "Unexpected GigaSTT version pin" }
+          if ($manifest.gigastt.sourceCommit -ne "5289e8a6b3a67217711e6b5cba6c2f19dec3c5eb") { throw "Unexpected source commit pin" }
+          if ($manifest.toolchain.rust -ne "1.94.0") { throw "Unexpected Rust pin" }
           if ($manifest.toolchain.protoc -ne "30.2") { throw "Unexpected protoc pin" }
           if ($manifest.toolchain.target -ne "x86_64-pc-windows-msvc") { throw "Unexpected target pin" }
           if ($manifest.fixture.sha256 -ne "500d2e88a1634ee766fec46f83cb903f3a1c276b2cedb36f11db800a1c4c14d0") { throw "Unexpected fixture pin" }
@@ -87,7 +87,7 @@ jobs:
       - name: Install pinned Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.88.0
+          toolchain: 1.94.0
           targets: x86_64-pc-windows-msvc
 
       - name: Install pinned protoc
@@ -100,7 +100,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: .gigastt-src -> target
-          shared-key: gigastt-v2.18.0-windows-x64-cpu-rust-1.88.0
+          shared-key: gigastt-v2.21.0-windows-x64-cpu-rust-1.94.0
           cache-on-failure: false
 
       - name: Build and inventory native runtime
@@ -191,10 +191,21 @@ jobs:
             -VadModelDir (Join-Path $env:GIGASTT_MODEL_DIR "vad") `
             -ExpectedAudioSha256 $manifest.fixture.sha256 `
             -EvidenceDir $env:GIGASTT_EVIDENCE_DIR `
+            -RawResultPath "$env:RUNNER_TEMP\gigastt-format-result.json" `
             -StartupTimeoutSeconds 180 `
             -JobTimeoutSeconds 180 `
             -RequestTimeoutSeconds 15 `
             -ShutdownTimeoutSeconds 20
+
+      - name: Verify visible punctuation against the actual native result
+        shell: pwsh
+        run: |
+          try {
+            cargo run --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked --bin verify-gigastt-format -- "$env:RUNNER_TEMP\gigastt-format-result.json"
+            if ($LASTEXITCODE -ne 0) { throw 'Native formatted transcript projection failed' }
+          } finally {
+            Remove-Item "$env:RUNNER_TEMP\gigastt-format-result.json" -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Verify opt-in Tauri resource stage
         shell: pwsh
@@ -218,7 +229,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gigastt-v2.18.0-windows-smoke-evidence
+          name: gigastt-v2.21.0-windows-smoke-evidence
           path: ${{ runner.temp }}\gigastt-windows-evidence
           if-no-files-found: warn
           retention-days: 14
@@ -226,7 +237,7 @@ jobs:
       - name: Upload native runtime spike
         uses: actions/upload-artifact@v4
         with:
-          name: gigastt-v2.18.0-windows-x86_64-runtime-spike
+          name: gigastt-v2.21.0-windows-x86_64-runtime-spike
           path: frontend/src-tauri/binaries/gigastt-runtime
           if-no-files-found: error
           retention-days: 14

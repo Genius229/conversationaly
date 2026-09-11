@@ -7,6 +7,10 @@ publish = false
 # Exercise the production modules without Tauri/GTK or native inference builds.
 [workspace]
 
+[[bin]]
+name = "verify-gigastt-format"
+path = "verify_format.rs"
+
 [[test]]
 name = "installer_shutdown"
 path = "../../frontend/src-tauri/src/installer_shutdown.rs"

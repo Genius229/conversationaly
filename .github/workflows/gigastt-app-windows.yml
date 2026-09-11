@@ -53,7 +53,7 @@ jobs:
           workspaces: . -> target
       - uses: actions/download-artifact@v4
         with:
-          name: gigastt-v2.18.0-windows-x86_64-runtime-spike
+          name: gigastt-v2.21.0-windows-x86_64-runtime-spike
           path: frontend/src-tauri/binaries/gigastt-runtime
       - name: Verify staged native runtime hashes and source pin
         shell: pwsh
@@ -63,7 +63,8 @@ jobs:
           $manifest = Get-Content scripts/gigastt/windows-resources.json -Raw | ConvertFrom-Json
           $inventory = Get-Content (Join-Path $root $manifest.packaging.runtimeInventoryName) -Raw | ConvertFrom-Json
           if ($inventory.sourceCommit -ne $manifest.gigastt.sourceCommit) { throw 'GigaSTT source mismatch' }
-          foreach ($file in $inventory.packagedFiles) {
+          if (@($inventory.noticeFiles).Count -ne 2) { throw 'Missing upstream license/notice inventory' }
+          foreach ($file in @($inventory.packagedFiles) + @($inventory.noticeFiles)) {
             if ($file.name -ne [IO.Path]::GetFileName($file.name)) { throw 'Invalid runtime path' }
             $hash = (Get-FileHash (Join-Path $root $file.name) -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($hash -ne $file.sha256) { throw "Runtime hash mismatch: $($file.name)" }
@@ -113,7 +114,7 @@ jobs:
           if ($binary.Count -ne 1) { throw 'Installer is missing its GigaSTT executable' }
           $manifest = Get-Content scripts/gigastt/windows-resources.json -Raw | ConvertFrom-Json
           $inventory = Get-Content (Join-Path 'frontend/src-tauri/binaries/gigastt-runtime' $manifest.packaging.runtimeInventoryName) -Raw | ConvertFrom-Json
-          foreach ($file in $inventory.packagedFiles) {
+          foreach ($file in @($inventory.packagedFiles) + @($inventory.noticeFiles)) {
             $path = Join-Path $binary[0].DirectoryName $file.name
             $actual = (Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($actual -ne $file.sha256) { throw "Installer runtime mismatch: $($file.name)" }

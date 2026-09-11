@@ -1,4 +1,4 @@
-//! Small, strict HTTP client for the GigaSTT 2.18 asynchronous jobs API.
+//! Small, strict HTTP client for the GigaSTT 2.21 asynchronous jobs API.
 
 use std::time::Duration;
 

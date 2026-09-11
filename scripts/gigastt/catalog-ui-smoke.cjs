@@ -65,7 +65,7 @@ async function main() {
 
     await page.goto(`${base}/meeting-details?id=catalog-smoke`);
     const meetingPanel = page.getByRole('region', { name: 'GigaSTT final transcription' });
-    await meetingPanel.getByText(/Ready.*v2\.18\.0/).waitFor();
+    await meetingPanel.getByText('Ready', { exact: true }).waitFor();
     assert.equal(await meetingPanel.getByRole('button', { name: /download.*models/i }).count(), 0);
     await page.goto(`${base}/settings`);
     await page.getByRole('tab', { name: 'Transcription', exact: true }).click();

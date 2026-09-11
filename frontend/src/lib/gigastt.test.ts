@@ -295,7 +295,7 @@ test('model readiness requires every pinned file to be valid', () => {
 });
 
 test('GigaSTT catalog search names the final offline workflow, not the live model', () => {
-  for (const query of ['gigastt', '2.18.0', 'after recording', 'offline', 'russian', 'final transcript']) {
+  for (const query of ['gigastt', '2.21.0', 'after recording', 'offline', 'russian', 'final transcript']) {
     assert.equal(gigasttCatalogMatches(query), true, query);
   }
   assert.equal(gigasttCatalogMatches('gigaam q8 live'), false);
@@ -380,7 +380,7 @@ test('GigaSTT catalog status distinguishes download, repair, progress, and ready
     {
       installed: true,
       ready: true,
-      statusLabel: 'Ready · v2.18.0',
+      statusLabel: 'Ready',
       actionLabel: null,
       filesLabel: '8 verified',
     },

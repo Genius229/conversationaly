@@ -201,7 +201,7 @@ export interface GigasttModelDownloadState {
 export const GIGASTT_CATALOG_MODEL = {
   id: 'gigastt-post-recording',
   label: 'GigaSTT',
-  version: '2.18.0',
+  version: '2.21.0',
   useTag: 'After recording · Offline',
   description:
     'Creates the final Russian transcript after recording. Separate from the live model selected for recording.',
@@ -260,7 +260,7 @@ export function gigasttCatalogView(
     return {
       installed: true,
       ready: true,
-      statusLabel: `Ready · v${status.version}`,
+      statusLabel: 'Ready',
       actionLabel: null,
       filesLabel: `${GIGASTT_CATALOG_MODEL.fileCount} verified`,
     };

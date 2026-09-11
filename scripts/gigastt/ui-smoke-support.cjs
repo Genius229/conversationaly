@@ -122,7 +122,7 @@ function installTauriFixture(options = {}) {
         if (command === 'plugin:event|unlisten') { listeners.delete(args.eventId); return null; }
         if (command === 'plugin:event|emit') { emit(args.event, args.payload); return null; }
         if (command === 'plugin:os|platform') return options.platform || 'windows';
-        if (command === 'plugin:app|version') return '1.4.1';
+        if (command === 'plugin:app|version') return '1.4.2';
         if (command === 'get_onboarding_status') return structuredClone(state.onboardingStatus);
         if (command === 'check_first_launch') return !state.initialized;
         if (command === 'initialize_fresh_database') { state.initialized = true; persist(); return null; }

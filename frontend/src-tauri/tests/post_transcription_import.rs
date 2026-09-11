@@ -134,6 +134,414 @@ fn maps_segment_seconds_speakers_and_stable_ids() {
 }
 
 #[test]
+fn maps_canonical_punctuation_and_case_onto_existing_segment_bounds() {
+    let mut result = valid_result();
+    result.text = "Первый, второй!".to_string();
+    result.words[0].word = "первый".to_string();
+    result.segments.as_mut().unwrap()[0].text = "первый".to_string();
+    result.segments.as_mut().unwrap()[0].words[0].word = "первый".to_string();
+
+    let rows = map_result("meeting-a", &result).unwrap();
+
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].transcript, "Первый,");
+    assert_eq!(rows[1].transcript, "второй!");
+    assert_eq!(
+        (rows[0].audio_start_time, rows[0].audio_end_time),
+        (0.25, 1.0)
+    );
+    assert_eq!(
+        (rows[1].audio_start_time, rows[1].audio_end_time),
+        (2.0, 3.25)
+    );
+    assert_eq!(rows[0].speaker.as_deref(), Some("speaker_0"));
+    assert_eq!(rows[1].speaker.as_deref(), Some("speaker_1"));
+}
+
+#[test]
+fn keeps_itn_number_merges_inside_their_timed_segment() {
+    let result = GigasttResult {
+        text: "Цена 25 рублей.".to_string(),
+        duration: 3.5,
+        confidence: Some(0.91),
+        words: vec![
+            WordInfo {
+                word: "цена".to_string(),
+                start: 0.25,
+                end: 0.5,
+                confidence: Some(0.9),
+                speaker: Some(0),
+            },
+            WordInfo {
+                word: "двадцать".to_string(),
+                start: 0.55,
+                end: 0.75,
+                confidence: Some(0.9),
+                speaker: Some(0),
+            },
+            WordInfo {
+                word: "пять".to_string(),
+                start: 0.8,
+                end: 1.0,
+                confidence: Some(0.9),
+                speaker: Some(0),
+            },
+            WordInfo {
+                word: "рублей".to_string(),
+                start: 2.0,
+                end: 3.25,
+                confidence: Some(0.8),
+                speaker: Some(1),
+            },
+        ],
+        segments: Some(vec![
+            Segment {
+                start: 0.25,
+                end: 1.0,
+                text: "цена двадцать пять".to_string(),
+                words: vec![
+                    WordInfo {
+                        word: "цена".to_string(),
+                        start: 0.25,
+                        end: 0.5,
+                        confidence: Some(0.9),
+                        speaker: Some(0),
+                    },
+                    WordInfo {
+                        word: "двадцать".to_string(),
+                        start: 0.55,
+                        end: 0.75,
+                        confidence: Some(0.9),
+                        speaker: Some(0),
+                    },
+                    WordInfo {
+                        word: "пять".to_string(),
+                        start: 0.8,
+                        end: 1.0,
+                        confidence: Some(0.9),
+                        speaker: Some(0),
+                    },
+                ],
+                speaker: Some(0),
+            },
+            Segment {
+                start: 2.0,
+                end: 3.25,
+                text: "рублей".to_string(),
+                words: vec![WordInfo {
+                    word: "рублей".to_string(),
+                    start: 2.0,
+                    end: 3.25,
+                    confidence: Some(0.8),
+                    speaker: Some(1),
+                }],
+                speaker: Some(1),
+            },
+        ]),
+    };
+
+    let rows = map_result("meeting-a", &result).unwrap();
+
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].transcript, "Цена 25");
+    assert_eq!(rows[1].transcript, "рублей.");
+    assert_eq!(rows[0].speaker.as_deref(), Some("speaker_0"));
+    assert_eq!(rows[1].speaker.as_deref(), Some("speaker_1"));
+}
+
+#[test]
+fn ambiguous_itn_across_speakers_merges_without_a_speaker_label() {
+    let mut result = valid_result();
+    result.text = "25.".to_string();
+    result.words[0].word = "двадцать".to_string();
+    result.words[1].word = "пять".to_string();
+    let segments = result.segments.as_mut().unwrap();
+    segments[0].text = "двадцать".to_string();
+    segments[0].words[0].word = "двадцать".to_string();
+    segments[1].text = "пять".to_string();
+    segments[1].words[0].word = "пять".to_string();
+
+    let rows = map_result("meeting-a", &result).unwrap();
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].transcript, "25.");
+    assert_eq!(
+        (rows[0].audio_start_time, rows[0].audio_end_time),
+        (0.25, 3.25)
+    );
+    assert_eq!(rows[0].speaker, None);
+}
+
+#[test]
+fn aligns_repeated_words_monotonically_across_canonical_whitespace() {
+    let mut result = valid_result();
+    result.text = "  Да,\n\tда.  ".to_string();
+    for word in &mut result.words {
+        word.word = "да".to_string();
+    }
+    for segment in result.segments.as_mut().unwrap() {
+        segment.text = "да".to_string();
+        segment.words[0].word = "да".to_string();
+    }
+
+    let rows = map_result("meeting-a", &result).unwrap();
+
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].transcript, "Да,");
+    assert_eq!(rows[1].transcript, "да.");
+    assert_eq!(rows[0].speaker.as_deref(), Some("speaker_0"));
+    assert_eq!(rows[1].speaker.as_deref(), Some("speaker_1"));
+}
+
+#[test]
+fn canonical_deletion_does_not_drop_timed_segment_coverage() {
+    let word = |text: &str, start: f64, end: f64, speaker: u32| WordInfo {
+        word: text.to_string(),
+        start,
+        end,
+        confidence: Some(0.9),
+        speaker: Some(speaker),
+    };
+    let words = vec![
+        word("э", 0.1, 0.3, 0),
+        word("м", 0.5, 0.7, 1),
+        word("привет", 1.0, 1.5, 1),
+    ];
+    let result = GigasttResult {
+        text: "Привет.".to_string(),
+        duration: 2.0,
+        confidence: Some(0.9),
+        words: words.clone(),
+        segments: Some(vec![
+            Segment {
+                start: 0.1,
+                end: 0.3,
+                text: "э".to_string(),
+                words: vec![words[0].clone()],
+                speaker: Some(0),
+            },
+            Segment {
+                start: 0.5,
+                end: 0.7,
+                text: "м".to_string(),
+                words: vec![words[1].clone()],
+                speaker: Some(1),
+            },
+            Segment {
+                start: 1.0,
+                end: 1.5,
+                text: "привет".to_string(),
+                words: vec![words[2].clone()],
+                speaker: Some(1),
+            },
+        ]),
+    };
+
+    let rows = map_result("meeting-a", &result).unwrap();
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].transcript, "Привет.");
+    assert_eq!(
+        (rows[0].audio_start_time, rows[0].audio_end_time),
+        (0.1, 1.5)
+    );
+    assert_eq!(rows[0].speaker, None);
+}
+
+#[test]
+fn repeated_itn_word_uses_the_anchor_with_matching_forward_context() {
+    let word = |text: &str, start: f64, end: f64, speaker: u32| WordInfo {
+        word: text.to_string(),
+        start,
+        end,
+        confidence: Some(0.9),
+        speaker: Some(speaker),
+    };
+    let words = vec![
+        word("двадцать", 0.1, 0.3, 0),
+        word("пять", 0.4, 0.6, 0),
+        word("пять", 1.0, 1.2, 1),
+        word("рублей", 1.3, 1.6, 1),
+    ];
+    let result = GigasttResult {
+        text: "25 пять рублей.".to_string(),
+        duration: 2.0,
+        confidence: Some(0.9),
+        words: words.clone(),
+        segments: Some(vec![
+            Segment {
+                start: 0.1,
+                end: 0.6,
+                text: "двадцать пять".to_string(),
+                words: words[..2].to_vec(),
+                speaker: Some(0),
+            },
+            Segment {
+                start: 1.0,
+                end: 1.6,
+                text: "пять рублей".to_string(),
+                words: words[2..].to_vec(),
+                speaker: Some(1),
+            },
+        ]),
+    };
+
+    let rows = map_result("meeting-a", &result).unwrap();
+
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].transcript, "25");
+    assert_eq!(rows[1].transcript, "пять рублей.");
+    assert_eq!(rows[0].speaker.as_deref(), Some("speaker_0"));
+    assert_eq!(rows[1].speaker.as_deref(), Some("speaker_1"));
+}
+
+#[test]
+fn equal_repeated_anchors_are_skipped_for_an_unambiguous_boundary() {
+    let word = |text: &str, start: f64, end: f64, speaker: u32| WordInfo {
+        word: text.to_string(),
+        start,
+        end,
+        confidence: Some(0.9),
+        speaker: Some(speaker),
+    };
+    let words = vec![
+        word("начало", 0.1, 0.2, 0),
+        word("двадцать", 0.25, 0.4, 0),
+        word("пять", 0.45, 0.6, 0),
+        word("слово", 1.0, 1.1, 1),
+        word("пять", 1.15, 1.3, 1),
+    ];
+    let result = GigasttResult {
+        text: "Начало 25 слово пять.".to_string(),
+        duration: 1.5,
+        confidence: Some(0.9),
+        words: words.clone(),
+        segments: Some(vec![
+            Segment {
+                start: 0.1,
+                end: 0.6,
+                text: "начало двадцать пять".to_string(),
+                words: words[..3].to_vec(),
+                speaker: Some(0),
+            },
+            Segment {
+                start: 1.0,
+                end: 1.3,
+                text: "слово пять".to_string(),
+                words: words[3..].to_vec(),
+                speaker: Some(1),
+            },
+        ]),
+    };
+
+    let rows = map_result("meeting-a", &result).unwrap();
+
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].transcript, "Начало 25");
+    assert_eq!(rows[1].transcript, "слово пять.");
+    assert_eq!(rows[0].speaker.as_deref(), Some("speaker_0"));
+    assert_eq!(rows[1].speaker.as_deref(), Some("speaker_1"));
+}
+
+#[test]
+fn indistinguishable_repeated_context_across_speakers_merges_conservatively() {
+    let word = |text: &str, index: usize, speaker: u32| WordInfo {
+        word: text.to_string(),
+        start: index as f64 * 0.2,
+        end: index as f64 * 0.2 + 0.1,
+        confidence: Some(0.9),
+        speaker: Some(speaker),
+    };
+    let words = vec![
+        word("начало", 0, 0),
+        word("двадцать", 1, 0),
+        word("пять", 2, 0),
+        word("раз", 3, 0),
+        word("пять", 4, 1),
+        word("раз", 5, 1),
+        word("лишнее", 6, 1),
+        word("конец", 7, 1),
+    ];
+    let result = GigasttResult {
+        text: "Начало 25 пять раз конец.".to_string(),
+        duration: 2.0,
+        confidence: Some(0.9),
+        words: words.clone(),
+        segments: Some(vec![
+            Segment {
+                start: words[0].start,
+                end: words[3].end,
+                text: "начало двадцать пять раз".to_string(),
+                words: words[..4].to_vec(),
+                speaker: Some(0),
+            },
+            Segment {
+                start: words[4].start,
+                end: words[7].end,
+                text: "пять раз лишнее конец".to_string(),
+                words: words[4..].to_vec(),
+                speaker: Some(1),
+            },
+        ]),
+    };
+
+    let rows = map_result("meeting-a", &result).unwrap();
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].transcript, "Начало 25 пять раз конец.");
+    assert_eq!(rows[0].speaker, None);
+    assert_eq!(rows[0].audio_start_time, words[0].start);
+    assert_eq!(rows[0].audio_end_time, words[7].end);
+}
+
+#[test]
+fn long_repeated_transcript_keeps_all_timed_rows_with_bounded_alignment() {
+    const WORD_COUNT: usize = 2_048;
+    let mut words = Vec::with_capacity(WORD_COUNT);
+    let mut segments = Vec::with_capacity(WORD_COUNT);
+    let mut canonical = Vec::with_capacity(WORD_COUNT);
+
+    for index in 0..WORD_COUNT {
+        let is_number = index % 97 == 0;
+        let raw = if is_number { "один" } else { "да" };
+        let formatted = if is_number { "1" } else { "да" };
+        let start = index as f64 * 0.02;
+        let word = WordInfo {
+            word: raw.to_string(),
+            start,
+            end: start + 0.01,
+            confidence: Some(0.9),
+            speaker: None,
+        };
+        words.push(word.clone());
+        segments.push(Segment {
+            start: word.start,
+            end: word.end,
+            text: raw.to_string(),
+            words: vec![word],
+            speaker: None,
+        });
+        canonical.push(formatted);
+    }
+
+    let result = GigasttResult {
+        text: canonical.join(" "),
+        duration: WORD_COUNT as f64 * 0.02,
+        confidence: Some(0.9),
+        words,
+        segments: Some(segments),
+    };
+
+    let rows = map_result("meeting-long", &result).unwrap();
+
+    assert_eq!(rows.len(), WORD_COUNT);
+    assert_eq!(rows[0].transcript, "1");
+    assert_eq!(rows[1].transcript, "да");
+    assert_eq!(rows[1_940].transcript, "1");
+    assert!((rows.last().unwrap().audio_end_time - 40.95).abs() < 1e-9);
+}
+
+#[test]
 fn preserves_zero_duration_source_timestamps() {
     let mut result = valid_result();
     result.words[0].end = result.words[0].start;

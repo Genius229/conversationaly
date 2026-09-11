@@ -252,6 +252,20 @@ while ($pendingPeFiles.Count -gt 0) {
 $rawPath = Join-Path $output "dumpbin-dependents.txt"
 [IO.File]::WriteAllText($rawPath, ($rawInventory -join "`r`n`r`n"), [Text.UTF8Encoding]::new($false))
 
+# Preserve the pinned upstream's redistribution notices inside the installer,
+# not just on the download page. These are not model/audio runtime artifacts.
+$noticeFiles = @()
+foreach ($notice in @("LICENSE", "NOTICE")) {
+    $noticeSource = Join-Path $SourceDir $notice
+    if (-not (Test-Path -LiteralPath $noticeSource -PathType Leaf)) {
+        throw "Pinned GigaSTT source is missing $notice"
+    }
+    $noticeName = "GIGASTT-$notice.txt"
+    $noticeTarget = Join-Path $output $noticeName
+    Copy-Item -LiteralPath $noticeSource -Destination $noticeTarget
+    $noticeFiles += [ordered]@{ name = $noticeName; sha256 = Get-Sha256Lower -Path $noticeTarget }
+}
+
 $packagedFiles = @(Get-ChildItem -LiteralPath $output -File | Where-Object { $_.Extension -in @(".exe", ".dll") } | Sort-Object Name | ForEach-Object {
     [ordered]@{
         name = $_.Name
@@ -282,6 +296,7 @@ $inventory = [ordered]@{
     cargoCommand = "cargo $($cargoArgs -join ' ')"
     tauriResourceDirectory = [string]$manifest.packaging.tauriResourceDirectory
     packagedFiles = $packagedFiles
+    noticeFiles = @($noticeFiles)
     importedDlls = @($imports)
     pythonProductionDependency = $false
 }
