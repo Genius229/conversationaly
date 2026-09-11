@@ -558,7 +558,10 @@ async fn stalled_job_hits_deadline_cancels_remote_and_restores_ready() {
         .await
         .unwrap_err();
 
-    assert!(matches!(error, PostTranscriptionError::PollDeadline));
+    assert!(
+        matches!(error, PostTranscriptionError::PollDeadline),
+        "expected PollDeadline, got {error:?}"
+    );
     assert!(fixture.model_dir.join("fake-cancelled-jobs").exists());
     assert_eq!(draft(&fixture.pool).await.0, "draft survives");
     assert_eq!(fixture.sidecar.status().await, SidecarStatus::Ready);
