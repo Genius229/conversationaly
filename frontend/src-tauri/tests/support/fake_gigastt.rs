@@ -346,7 +346,11 @@ fn main() {
 
         match listener.accept() {
             Ok((mut stream, _)) => {
-                if let Err(error) = stream.set_read_timeout(Some(Duration::from_secs(2))) {
+                let request_read_timeout = control_text(&model_dir, "fake-request-read-timeout-ms")
+                    .and_then(|value| value.trim().parse().ok())
+                    .map(Duration::from_millis)
+                    .unwrap_or(Duration::from_secs(2));
+                if let Err(error) = stream.set_read_timeout(Some(request_read_timeout)) {
                     fail_fixture(&model_dir, "request_timeout", error.kind());
                 }
                 let request = match read_request(&mut stream) {

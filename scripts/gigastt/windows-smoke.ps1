@@ -9,6 +9,7 @@ param(
     [string]$BaseUrl = "http://127.0.0.1:9876",
     [string]$EvidenceDir = (Join-Path $env:TEMP "gigastt-windows-smoke"),
     [string]$RawResultPath = "",
+    [bool]$RequestItn = $true,
     [int]$StartupTimeoutSeconds = 180,
     [int]$JobTimeoutSeconds = 180,
     [int]$RequestTimeoutSeconds = 15,
@@ -189,7 +190,8 @@ try {
     }
 
     $audioBytes = [IO.File]::ReadAllBytes($audioPath)
-    $submitUrl = "$BaseUrl/v1/jobs?format=json&segments=true&word_timestamps=true&punctuation=true&itn=true&vad=true"
+    $itnQuery = $RequestItn.ToString().ToLowerInvariant()
+    $submitUrl = "$BaseUrl/v1/jobs?format=json&segments=true&word_timestamps=true&punctuation=true&itn=$itnQuery&vad=true"
     $submitResponse = Invoke-WebRequest -Uri $submitUrl -Method Post -ContentType "application/octet-stream" -Body $audioBytes -TimeoutSec $RequestTimeoutSeconds
     if ($submitResponse.StatusCode -ne 202) {
         throw "Expected POST /v1/jobs status 202, got $($submitResponse.StatusCode)"
@@ -318,6 +320,7 @@ try {
         startupElapsedSeconds = [Math]::Round($startupClock.Elapsed.TotalSeconds, 3)
         jobElapsedSeconds = [Math]::Round($jobClock.Elapsed.TotalSeconds, 3)
         punctuation = [bool]$health.punctuation
+        requestItn = $RequestItn
         itn = [bool]$health.itn
         shutdown = "pending"
     }

@@ -207,6 +207,27 @@ jobs:
             Remove-Item "$env:RUNNER_TEMP\gigastt-format-result.json" -Force -ErrorAction SilentlyContinue
           }
 
+      - name: Verify native casing without numeric ITN replacement
+        shell: pwsh
+        run: |
+          # The shared fixture starts with "sixty thousand". ITN legitimately
+          # replaces its sole uppercase word with digits; test casing separately.
+          $manifest = Get-Content -LiteralPath $env:GIGASTT_MANIFEST -Raw | ConvertFrom-Json
+          try {
+            ./scripts/gigastt/windows-smoke.ps1 `
+              -Binary (Join-Path $env:GIGASTT_RUNTIME_DIR $manifest.packaging.binaryName) `
+              -Audio (Join-Path $env:GIGASTT_SOURCE_DIR $manifest.fixture.sourceRelativePath) `
+              -ModelDir $env:GIGASTT_MODEL_DIR `
+              -ExpectedAudioSha256 $manifest.fixture.sha256 `
+              -EvidenceDir (Join-Path $env:GIGASTT_EVIDENCE_DIR "casing") `
+              -RawResultPath "$env:RUNNER_TEMP\gigastt-casing-result.json" `
+              -RequestItn $false
+            cargo run --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked --bin verify-gigastt-format -- "$env:RUNNER_TEMP\gigastt-casing-result.json" --require-uppercase
+            if ($LASTEXITCODE -ne 0) { throw 'Native casing projection failed' }
+          } finally {
+            Remove-Item "$env:RUNNER_TEMP\gigastt-casing-result.json" -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Verify opt-in Tauri resource stage
         shell: pwsh
         run: |

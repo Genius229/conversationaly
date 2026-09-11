@@ -541,6 +541,10 @@ async fn foreign_meeting_folder_is_rejected_before_decode_or_sidecar_start() {
 async fn stalled_job_hits_deadline_cancels_remote_and_restores_ready() {
     let fixture = Fixture::new(true).await;
     write_control(&fixture.model_dir, "fake-job-statuses", "processing:9");
+    // The production Axum server handles cancellation concurrently. This fake
+    // is intentionally single-threaded, so bound an abandoned near-deadline
+    // status connection below the service's 150 ms cancellation request bound.
+    write_control(&fixture.model_dir, "fake-request-read-timeout-ms", "40");
     let service = PostTranscriptionService::new(fixture.pool.clone(), fixture.sidecar.clone())
         .with_limits(
             Duration::from_millis(10),
@@ -562,7 +566,13 @@ async fn stalled_job_hits_deadline_cancels_remote_and_restores_ready() {
         matches!(error, PostTranscriptionError::PollDeadline),
         "expected PollDeadline, got {error:?}"
     );
-    assert!(fixture.model_dir.join("fake-cancelled-jobs").exists());
+    let requests = fs::read_to_string(fixture.model_dir.join("fake-requests")).unwrap_or_default();
+    let transport = fs::read_to_string(fixture.model_dir.join("fake-transport-diagnostics"))
+        .unwrap_or_default();
+    assert!(
+        fixture.model_dir.join("fake-cancelled-jobs").exists(),
+        "known job cancellation was not observed; requests={requests:?}; transport={transport:?}"
+    );
     assert_eq!(draft(&fixture.pool).await.0, "draft survives");
     assert_eq!(fixture.sidecar.status().await, SidecarStatus::Ready);
     fixture.sidecar.shutdown().await.unwrap();
