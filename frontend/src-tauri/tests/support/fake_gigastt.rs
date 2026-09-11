@@ -155,6 +155,10 @@ fn spawn_request_reader(
     timeout: Duration,
     ready: Sender<ReadRequestResult>,
 ) -> io::Result<()> {
+    // Winsock accept inherits the listener's nonblocking property, unlike
+    // Linux accept. Reader threads use ordinary blocking I/O with a finite
+    // read timeout on every platform.
+    stream.set_nonblocking(false)?;
     stream.set_read_timeout(Some(timeout))?;
     thread::Builder::new()
         .name("fake-gigastt-request-reader".into())
@@ -561,6 +565,29 @@ mod tests {
         );
 
         drop(abandoned);
+    }
+
+    #[test]
+    fn request_reader_normalizes_an_inherited_nonblocking_socket() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut client = TcpStream::connect(address).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        // Winsock accept inherits the listener's nonblocking socket property.
+        // Model that behavior explicitly so Linux exercises the Windows path.
+        server.set_nonblocking(true).unwrap();
+        let (ready_tx, ready_rx) = mpsc::channel::<ReadRequestResult>();
+        spawn_request_reader(server, Duration::from_secs(2), ready_tx).unwrap();
+
+        std::thread::sleep(Duration::from_millis(20));
+        client
+            .write_all(b"GET /v1/jobs/job_1 HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .unwrap();
+
+        let (_, request) = ready_rx.recv_timeout(Duration::from_millis(500)).unwrap();
+        let request = request.expect("reader must wait for a normal request instead of WouldBlock");
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.target, "/v1/jobs/job_1");
     }
 
     #[test]
