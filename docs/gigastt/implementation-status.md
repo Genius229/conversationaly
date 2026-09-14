@@ -1,13 +1,26 @@
 # GigaSTT integration — verification ledger
 
-Updated: 2026-09-14. Branch: `feat/gigastt-post-transcription`.
+Updated: 2026-09-15. Branch: `feat/gigastt-post-transcription`.
 
 **Automated integration gates passed:** full Windows Tauri/NSIS build, pinned
 GigaSTT native inference smoke, Windows/Ubuntu contract matrix, Clippy and
 frontend checks. UI/backend reviews approved. Remaining acceptance boundaries
 are listed below; this is an unsigned development build, not a production release.
 
-**Latest public diagnostic preview: 1.4.3 / GigaSTT 2.21.0.** Windows capture
+**Latest public preview: 1.4.4 / GigaSTT 2.21.0.** Adds a startup-only
+DirectShow microphone fallback for eligible exhausted WASAPI format failures.
+Working CPAL devices, system loopback and ASR/models remain unchanged. Exact
+unique device mapping, first-PCM readiness and bounded owned-child cleanup
+are tested; normal Stop drains the fallback before closing its audio sender.
+[Download EXE without login](https://github.com/Genius229/conversationaly/releases/download/gigastt-desktop-v1.4.4-preview.1/Conversationaly-GigaSTT-1.4.4-x64-setup.exe).
+Windows build **34894443916 PASS** (`f11ebab`), artifact **10368807115**:
+nine installer cases, twelve codec/resolver tests, real bundled FFmpeg DShow/
+PCM-tail test and native GigaSTT smoke. Contracts **34894443793 PASS**:
+Windows 173 / Ubuntu 173, 80 repeated Windows lifecycle checks, Clippy.
+Automatic fallback acceptance on the original problem PC remains pending.
+See `directshow-fallback.md` and `evidence/windows-directshow-2026-09-15.json`.
+
+**Previous public diagnostic preview: 1.4.3 / GigaSTT 2.21.0.** Windows capture
 now negotiates supported formats on the same endpoint after format rejection,
 with per-attempt parameters/HRESULTs and first-callback diagnostics. Default
 success remains the fast path. No GigaSTT/model changes or new diarization.

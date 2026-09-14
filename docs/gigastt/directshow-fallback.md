@@ -83,7 +83,25 @@ Speak, stop, play back the saved audio, then repeat start/stop. Send the new
 application log on success or failure. Check microphone and system audio
 separately: only the microphone has a DirectShow fallback.
 
-Pending: final source review, CI/build provenance and public download hash.
+## Verified public artifact
+
+- Source: `f11ebab382d650d132d5a444316da9940fecc409`; all three task reviews
+  approved after scoped corrections. Production capture/identity/wiring code
+  is separate from test fixtures and does not require Python at runtime.
+- Full Windows build **34894443916 SUCCESS**, installer artifact **10368807115**.
+- Windows and Ubuntu contracts **34894443793 SUCCESS**: **173 tests per OS**,
+  Clippy, and **80** repeated Windows lifecycle checks. Windows Job Object
+  parent-exit-after-readiness test passed on Windows, not just in simulation.
+- Actual bundled FFmpeg DirectShow support/PCM-tail test **PASS**. Existing
+  GigaSTT native formatting checks, frontend **31** tests, **12** codec/resolver
+  tests and **9** real Windows installer scenarios passed.
+- Public tag: `gigastt-desktop-v1.4.4-preview.1`, targeting that exact source.
+- EXE: `Conversationaly-GigaSTT-1.4.4-x64-setup.exe`, **62,428,318 bytes**.
+- SHA256: `e9f434bfd41eb7924538f44ab7fb8c629ee42c81a1eedd6f056ece869e693432`.
+- Anonymous `curl -q` EXE/SHA256SUMS download matches the tested installer.
+
+[Public EXE download](https://github.com/Genius229/conversationaly/releases/download/gigastt-desktop-v1.4.4-preview.1/Conversationaly-GigaSTT-1.4.4-x64-setup.exe)
+
 No claim is made yet that the automatic in-app fallback has been accepted on
 the user's original hardware; the previous direct-command test only proved
 that DirectShow can capture from that endpoint.

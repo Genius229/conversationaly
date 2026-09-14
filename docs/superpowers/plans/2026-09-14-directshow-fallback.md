@@ -41,14 +41,14 @@
 - [x] Finalize owner-thread/runtime API with lifecycle review.
 - [x] RED tests for first PCM gating, startup EOF/hang, cancellation before ready, fragmented PCM, nonfinite/truncated output, stderr flood, unexpected exit, graceful final tail, ignored quit/owned kill, Drop, repeated start/stop, no leaked child.
 - [x] Implement bounded child owner, parser/read loop and diagnostics; enforce Windows Job Object containment if available, failing cleanly if ownership cannot be established.
-- [ ] Test with fake child on Linux/Windows and real generated PCM through bundled FFmpeg in Windows CI; independent review.
+- [x] Test with fake child on Linux/Windows and real generated PCM through bundled FFmpeg in Windows CI; independent review. Windows Job parent-exit test passed.
 
 ### Task 3: Application wiring and release
-- [ ] Add Windows DirectShow variant and eligible-failure branch. Map the actual resolved name, output rate/channels and errors into existing AudioCapture.
-- [ ] Add selective pre-drain calls to normal stop/cleanup/Exit paths. Reject active DirectShow reconnect before awaits; keep CPAL reconnect's sync stop and explicitly forbid fallback on reconnect. Test routing and stop-order contracts; retain default CPAL behavior.
-- [ ] Add headless harness/CI hooks; bump app version consistently (1.4.4), unchanged ASR/models.
-- [ ] Full locked contracts/Clippy/frontend/type/build tests; independent final review.
-- [ ] Merge scoped commits back to the release branch, build Windows EXE with existing native/codec/installer gates, publish public preview and SHA256, verify anonymous download, document real-hardware acceptance still pending.
+- [x] Add Windows DirectShow variant and eligible-failure branch. Map the actual resolved name, output rate/channels and errors into existing AudioCapture.
+- [x] Add selective pre-drain calls to normal stop/cleanup/Exit paths. Reject active DirectShow reconnect before awaits; keep CPAL reconnect's sync stop and explicitly forbid fallback on reconnect. Test routing and stop-order contracts; retain default CPAL behavior.
+- [x] Add headless harness/CI hooks; bump app version consistently (1.4.4), unchanged ASR/models.
+- [x] Full locked contracts/Clippy/frontend/type/build tests; independent final review.
+- [x] Merge scoped commits back to the release branch, build Windows EXE with existing native/codec/installer gates, publish public preview and SHA256, verify anonymous download, document real-hardware acceptance still pending.
 
 ## Pre-flight review
 

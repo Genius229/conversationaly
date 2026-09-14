@@ -12,16 +12,17 @@ run on `feat/gigastt-post-transcription`.
 Record the run URL and commit SHA. Do not use an artifact from a failed or
 cancelled run. The build is CPU-only, with GigaSTT pinned to 2.21.0.
 
-Latest verified installer (Windows capture compatibility/diagnostics, retaining previous fixes):
-[run 34840350298](https://github.com/Genius229/conversationaly/actions/runs/34840350298),
-full native/desktop build and installer commit `9a9b3b3`.
-[Public EXE download](https://github.com/Genius229/conversationaly/releases/download/gigastt-desktop-v1.4.3-preview.1/Conversationaly-GigaSTT-1.4.3-x64-setup.exe)
+Latest verified installer (startup-only DirectShow microphone fallback, retaining previous fixes):
+[run 34894443916](https://github.com/Genius229/conversationaly/actions/runs/34894443916),
+full native/desktop build and installer commit `f11ebab`.
+[Public EXE download](https://github.com/Genius229/conversationaly/releases/download/gigastt-desktop-v1.4.4-preview.1/Conversationaly-GigaSTT-1.4.4-x64-setup.exe)
 (no GitHub login required; anonymous download/hash verified).
-Installer: `Conversationaly-GigaSTT-1.4.3-x64-setup.exe`.
-SHA256: `3d1a277cddcfc545d1c9c0253de74a641d8c1aeb4d2e6e82f177c861c89d6ab1`.
-All nine real installation/upgrade cases, ten codec tests and both native
-canonical text/casing checks passed. Bluetooth AI Speakerphone verification on
-the user's Windows 11 PC remains pending. See `windows-capture-compatibility.md`
+Installer: `Conversationaly-GigaSTT-1.4.4-x64-setup.exe`.
+SHA256: `e9f434bfd41eb7924538f44ab7fb8c629ee42c81a1eedd6f056ece869e693432`.
+All nine real installation/upgrade cases, twelve codec/resolver tests and both
+native canonical text/casing checks passed. Bundled FFmpeg DirectShow/PCM-tail
+and Windows child-ownership tests passed. Automatic fallback on the original
+problem PC remains pending. See `directshow-fallback.md`
 and `home-installer-verification.md` for evidence and remaining gates.
 
 The CI overlay uses `Conversationaly GigaSTT Dev` and identifier
