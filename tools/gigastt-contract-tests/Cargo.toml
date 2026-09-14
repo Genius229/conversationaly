@@ -7,6 +7,10 @@ publish = false
 # Exercise the production modules without Tauri/GTK or native inference builds.
 [workspace]
 
+[[test]]
+name = "capture_negotiation"
+path = "../../frontend/src-tauri/tests/capture_negotiation.rs"
+
 [[bin]]
 name = "verify-gigastt-format"
 path = "verify_format.rs"
@@ -25,6 +29,13 @@ path = "../../frontend/src-tauri/tests/post_transcription_preview.rs"
 
 [features]
 gigastt-test-fixtures = []
+
+# Compile the actual WASAPI adapter in the Windows gate without Tauri/GTK.
+# Match the desktop's pinned CPAL/windows pair, not its broader registry ranges.
+[target.'cfg(windows)'.dependencies]
+cpal = "=0.18.1"
+windows = "=0.61.3"
+windows-core = "=0.61.2"
 
 [[test]]
 name = "post_transcription_job_state"

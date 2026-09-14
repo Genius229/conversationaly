@@ -108,25 +108,42 @@ impl AudioStream {
         info!("Creating CPAL stream for device: {}", device.name);
 
         // Get the underlying cpal device and config
-        let (cpal_device, config) = get_device_and_config(&device).await?;
+        #[cfg(target_os = "windows")]
+        info!("capture_resolve requested={:?} endpoint_direction={:?} capture_direction={:?}", device.name, device.device_type, device_type);
+        let (cpal_device, config) = get_device_and_config(&device).await.map_err(|error| {
+            #[cfg(target_os = "windows")]
+            error!("capture_resolve requested={:?} stage=device_config result=error {}", device.name, super::capture_windows::error_log(&error));
+            error
+        })?;
 
         info!("Audio config - Sample rate: {}, Channels: {}, Format: {:?}",
               config.sample_rate(), config.channels(), config.sample_format());
 
-        // Create audio capture processor
-        let capture = AudioCapture::new(
-            device.clone(),
-            state.clone(),
-            config.sample_rate(),
-            config.channels(),
-            device_type,
-        );
-
-        // Build the appropriate stream based on sample format
-        let stream = Self::build_stream(&cpal_device, &config, capture.clone())?;
+        // Each candidate needs processing state with its own rate/channels.
+        // A rejected stream never starts; its callbacks/state are dropped.
+        let build = |candidate: &SupportedStreamConfig| {
+            let capture = AudioCapture::new(
+                device.clone(), state.clone(), candidate.sample_rate(),
+                candidate.channels(), device_type.clone(),
+            );
+            Self::build_stream(&cpal_device, candidate, capture)
+        };
+        #[cfg(target_os = "windows")]
+        let (stream, selected) = super::capture_windows::open(
+            &cpal_device, config,
+            matches!(device.device_type, super::devices::DeviceType::Output), build,
+        )?;
+        #[cfg(not(target_os = "windows"))]
+        let stream = build(&config)?;
 
         // Start the stream
-        stream.play()?;
+        if let Err(error) = stream.play() {
+            #[cfg(target_os = "windows")]
+            error!("capture_play device={:?} selected={:?} stage=play {}", device.name, selected, super::capture_windows::error_log(&anyhow::anyhow!(error.clone())));
+            return Err(error.into());
+        }
+        #[cfg(target_os = "windows")]
+        info!("capture_play device={:?} selected={:?} stage=play result=ok", device.name, selected);
         info!("CPAL stream started for device: {}", device.name);
 
         Ok(Self {

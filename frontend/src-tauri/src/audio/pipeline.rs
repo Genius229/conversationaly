@@ -592,7 +592,14 @@ impl AudioCapture {
         if matches!(self.device_type, DeviceType::Microphone) {
             self.state.note_frames(frames);
         }
-        self.callbacks.fetch_add(1, Relaxed);
+        let callback_index = self.callbacks.fetch_add(1, Relaxed);
+        #[cfg(target_os = "windows")]
+        if callback_index == 0 {
+            info!("capture_first_callback device={:?} direction={:?} rate={} channels={} frames={} elapsed_ms={}",
+                self.device.name, self.device_type, self.sample_rate, self.channels, frames, self.started.elapsed().as_millis());
+        }
+        #[cfg(not(target_os = "windows"))]
+        let _ = callback_index;
 
         // The counters above stay unconditional — three atomics, and the health
         // line is only meaningful if they count every callback. Only the log
@@ -904,6 +911,9 @@ impl AudioCapture {
     /// used to — 0.18 reworded those messages, which would have silently downgraded
     /// every disconnect to a generic StreamFailed.
     pub fn handle_stream_error(&self, error: cpal::Error) {
+        #[cfg(target_os = "windows")]
+        warn!("capture_callback_error device={:?} direction={:?} rate={} channels={} {}", self.device.name, self.device_type,
+            self.sample_rate, self.channels, super::capture_windows::error_log(&anyhow::anyhow!(error.clone())));
         let audio_error = match error.kind() {
             // Not a failure, and deliberately not reported. cpal 0.15 had no underrun
             // callback at all, so this arrives only since 0.17; an xrun means a few

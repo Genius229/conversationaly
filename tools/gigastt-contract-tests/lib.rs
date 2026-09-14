@@ -36,6 +36,7 @@ pub use gigastt_sidecar::*;
 pub use types::*;
 
 pub mod audio {
+    pub use crate::capture_negotiation;
     pub mod post_transcription {
         pub use crate::audio_prepare;
         pub use crate::finalization;
@@ -59,3 +60,9 @@ pub mod audio {
         pub use crate::{GigasttClient, GigasttClientError, SubmitJobOptions};
     }
 }
+#[path = "../../frontend/src-tauri/src/audio/capture_negotiation.rs"]
+pub mod capture_negotiation;
+#[cfg(target_os = "windows")]
+#[allow(dead_code)] // The desktop calls open; CI compiles/tests the real adapter.
+#[path = "../../frontend/src-tauri/src/audio/capture_windows.rs"]
+pub mod capture_windows;

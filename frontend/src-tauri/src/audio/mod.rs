@@ -7,6 +7,9 @@ pub mod vad;
 
 // Modularized device management
 pub mod capture;
+pub mod capture_negotiation;
+#[cfg(target_os = "windows")]
+mod capture_windows;
 pub mod devices;
 pub mod permissions;
 

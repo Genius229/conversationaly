@@ -524,7 +524,7 @@ pub fn run() {
         .manage(audio::post_transcription::model_commands::ModelJobs::default())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
-            log::info!("Starting application...");
+            log::info!("Starting application... version={} os={} arch={} capture_diagnostics=v1", env!("CARGO_PKG_VERSION"), std::env::consts::OS, std::env::consts::ARCH);
 
             // If the old instance exited in the narrow gap between the
             // installer's path-scoped process check and its cooperative launch,
