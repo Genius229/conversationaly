@@ -75,6 +75,7 @@ node_modules/
 experiments/
 .cursor/
 target/
+.worktrees/
 
 frontend/src-tauri/binaries/
 .hallmark/
