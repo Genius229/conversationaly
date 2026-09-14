@@ -1,6 +1,6 @@
 [package]
 name = "conversationaly"
-version = "1.4.3"
+version = "1.4.4"
 description = "A Tauri App for meeting minutes"
 authors = ["Sujith S"]
 license = "MIT"
@@ -161,6 +161,8 @@ transcribe-cpp = { git = "https://github.com/handy-computer/transcribe.cpp", rev
 #   --features vulkan   (AMD/Intel GPUs)
 #   --features openblas (OpenBLAS optimization, requires BLAS_INCLUDE_DIRS)
 [target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "=0.61.3", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security"] }
+windows-core = "=0.61.2"
 futures-channel = "0.3.31"
 
 # default-features = false: transcribe-cpp defaults to `metal`, which is a
@@ -187,6 +189,16 @@ tempfile = "3.3.0"
 [[bin]]
 name = "fake-gigastt"
 path = "tests/support/fake_gigastt.rs"
+required-features = ["gigastt-test-fixtures"]
+
+[[bin]]
+name = "fake-ffmpeg-capture"
+path = "tests/support/fake_ffmpeg_capture.rs"
+required-features = ["gigastt-test-fixtures"]
+
+[[test]]
+name = "directshow_capture"
+path = "tests/directshow_capture.rs"
 required-features = ["gigastt-test-fixtures"]
 
 [[test]]

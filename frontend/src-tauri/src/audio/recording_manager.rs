@@ -255,6 +255,19 @@ impl RecordingManager {
         }
     }
 
+    /// Stop capture without closing the pipeline before a DirectShow tail has
+    /// been delivered. CPAL-only recordings retain their historical order.
+    async fn stop_capture_sources(&mut self) -> Result<()> {
+        if self.stream_manager.has_directshow_microphone() {
+            let result = self.stream_manager.stop_streams_and_drain().await;
+            self.state.stop_recording();
+            result
+        } else {
+            self.state.stop_recording();
+            self.stream_manager.stop_streams()
+        }
+    }
+
     /// Stop recording streams without saving (for use when waiting for transcription)
     pub async fn stop_streams_only(&mut self) -> Result<()> {
         info!("Stopping recording streams only");
@@ -264,11 +277,7 @@ impl RecordingManager {
             monitor.stop_monitoring().await;
         }
 
-        // Stop recording state first
-        self.state.stop_recording();
-
-        // Stop audio streams
-        if let Err(e) = self.stream_manager.stop_streams() {
+        if let Err(e) = self.stop_capture_sources().await {
             error!("Error stopping audio streams: {}", e);
         }
 
@@ -292,11 +301,7 @@ impl RecordingManager {
             monitor.stop_monitoring().await;
         }
 
-        // Stop recording state first - this clears device references
-        self.state.stop_recording();
-
-        // Stop audio streams immediately
-        if let Err(e) = self.stream_manager.stop_streams() {
+        if let Err(e) = self.stop_capture_sources().await {
             error!("Error stopping audio streams: {}", e);
         }
 
@@ -350,11 +355,7 @@ impl RecordingManager {
         let recording_duration = self.state.get_active_recording_duration();
         info!("Recording duration before stop: {:?}s", recording_duration);
 
-        // Stop recording state first
-        self.state.stop_recording();
-
-        // Stop audio streams
-        if let Err(e) = self.stream_manager.stop_streams() {
+        if let Err(e) = self.stop_capture_sources().await {
             error!("Error stopping audio streams: {}", e);
         }
 
@@ -448,6 +449,10 @@ impl RecordingManager {
         self.stream_manager.active_stream_count()
     }
 
+    pub fn has_directshow_microphone(&self) -> bool {
+        self.stream_manager.has_directshow_microphone()
+    }
+
     /// Set error callback for handling errors
     pub fn set_error_callback<F>(&self, callback: F)
     where
@@ -490,14 +495,10 @@ impl RecordingManager {
 
     /// Cleanup all resources without saving
     pub async fn cleanup_without_save(&mut self) {
-        if self.is_recording() {
+        if self.is_recording() || self.stream_manager.has_directshow_microphone() {
             debug!("Stopping recording without saving during cleanup");
 
-            // Stop recording state first
-            self.state.stop_recording();
-
-            // Stop audio streams
-            if let Err(e) = self.stream_manager.stop_streams() {
+            if let Err(e) = self.stop_capture_sources().await {
                 error!("Error stopping audio streams during cleanup: {}", e);
             }
 
@@ -505,6 +506,22 @@ impl RecordingManager {
             if let Err(e) = self.pipeline_manager.stop().await {
                 error!("Error stopping audio pipeline during cleanup: {}", e);
             }
+        }
+        self.state.cleanup();
+    }
+
+    /// Selective exit teardown for the externally owned Windows capture.
+    #[cfg(target_os = "windows")]
+    pub async fn cleanup_external_capture_on_exit(&mut self) {
+        if let Some(ref mut monitor) = self.device_monitor {
+            monitor.stop_monitoring().await;
+        }
+        if let Err(error) = self.stream_manager.stop_streams_and_drain().await {
+            error!("Error draining external capture during exit: {error}");
+        }
+        self.state.stop_recording();
+        if let Err(error) = self.pipeline_manager.stop().await {
+            error!("Error stopping audio pipeline during exit: {error}");
         }
         self.state.cleanup();
     }
@@ -530,6 +547,12 @@ impl RecordingManager {
     pub async fn attempt_device_reconnect(&mut self, device_name: &str, device_type: DeviceMonitorType) -> Result<bool> {
         info!("🔄 Attempting to reconnect device: {} ({:?})", device_name, device_type);
 
+        if self.stream_manager.has_directshow_microphone() {
+            return Err(anyhow::anyhow!(
+                "DirectShow microphone reconnection is not supported; stop and start recording again"
+            ));
+        }
+
         // List current devices
         let available_devices = list_audio_devices().await?;
 
@@ -553,7 +576,9 @@ impl RecordingManager {
                     self.stream_manager.stop_streams()?;
                     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-                    self.stream_manager.start_streams(Some(device_arc.clone()), system_device).await?;
+                    self.stream_manager
+                        .start_streams_without_fallback(Some(device_arc.clone()), system_device)
+                        .await?;
                     self.state.set_microphone_device(device_arc);
 
                     info!("✅ Microphone reconnected successfully");
@@ -567,7 +592,9 @@ impl RecordingManager {
                     self.stream_manager.stop_streams()?;
                     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-                    self.stream_manager.start_streams(microphone_device, Some(device_arc.clone())).await?;
+                    self.stream_manager
+                        .start_streams_without_fallback(microphone_device, Some(device_arc.clone()))
+                        .await?;
                     self.state.set_system_device(device_arc);
 
                     info!("✅ System audio reconnected successfully");

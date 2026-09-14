@@ -36,6 +36,7 @@ pub use gigastt_sidecar::*;
 pub use types::*;
 
 pub mod audio {
+    pub use crate::directshow;
     pub use crate::capture_negotiation;
     pub mod post_transcription {
         pub use crate::audio_prepare;
@@ -66,3 +67,6 @@ pub mod capture_negotiation;
 #[allow(dead_code)] // The desktop calls open; CI compiles/tests the real adapter.
 #[path = "../../frontend/src-tauri/src/audio/capture_windows.rs"]
 pub mod capture_windows;
+
+#[path = "../../frontend/src-tauri/src/audio/directshow/mod.rs"]
+pub mod directshow;

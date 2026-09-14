@@ -87,6 +87,12 @@ jobs:
       - name: Check portable ggml instruction floor
         shell: pwsh
         run: ./scripts/assert-no-avx512.ps1
+      - name: Verify DirectShow support and PCM framing with bundled FFmpeg
+        shell: pwsh
+        run: |
+          $env:DIRECTSHOW_TEST_FFMPEG = (Resolve-Path 'frontend/src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe').Path
+          cargo test --manifest-path tools/gigastt-contract-tests/Cargo.toml --locked --features gigastt-test-fixtures --test directshow_ffmpeg -- --ignored --test-threads=1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify real import codecs with the bundled Windows FFmpeg
         shell: pwsh
         run: |

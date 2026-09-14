@@ -28,6 +28,25 @@ pub fn find_existing_ffmpeg_path() -> Option<PathBuf> {
     find_existing_ffmpeg_path_internal()
 }
 
+/// Locate the only FFmpeg binary allowed for live DirectShow capture.
+///
+/// Unlike import decoding, live microphone fallback must not depend on PATH,
+/// the working directory, a prior sidecar installation, or a download. The
+/// Windows installer places `ffmpeg.exe` next to the application executable.
+#[cfg(any(target_os = "windows", test))]
+pub fn find_bundled_ffmpeg_path_strict() -> Option<PathBuf> {
+    std::env::current_exe()
+        .ok()
+        .as_deref()
+        .and_then(strict_bundled_ffmpeg_for_executable)
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn strict_bundled_ffmpeg_for_executable(executable: &std::path::Path) -> Option<PathBuf> {
+    let bundled = executable.parent()?.join("ffmpeg.exe");
+    bundled.is_file().then_some(bundled)
+}
+
 fn find_existing_ffmpeg_path_internal() -> Option<PathBuf> {
     debug!("Searching for an existing ffmpeg executable");
 
@@ -239,4 +258,34 @@ fn get_ffmpeg_install_dir() -> Result<PathBuf, anyhow::Error> {
 fn get_ffmpeg_install_dir() -> Result<PathBuf, anyhow::Error> {
     // Your existing logic for other platforms
     sidecar_dir().map_err(|e| anyhow::anyhow!(e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn directshow_ffmpeg_must_be_a_file_next_to_the_current_executable() {
+        let temp = tempfile::tempdir().unwrap();
+        let executable = temp.path().join("Conversationaly.exe");
+        std::fs::write(&executable, b"app").unwrap();
+        let bundled = temp.path().join("ffmpeg.exe");
+        std::fs::write(&bundled, b"ffmpeg").unwrap();
+
+        assert_eq!(strict_bundled_ffmpeg_for_executable(&executable), Some(bundled));
+    }
+
+    #[test]
+    fn directshow_ffmpeg_never_falls_back_to_a_directory_or_search_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let executable = temp.path().join("Conversationaly.exe");
+        std::fs::write(&executable, b"app").unwrap();
+        std::fs::create_dir(temp.path().join("ffmpeg.exe")).unwrap();
+
+        assert_eq!(strict_bundled_ffmpeg_for_executable(&executable), None);
+
+        let elsewhere = tempfile::tempdir().unwrap();
+        std::fs::write(elsewhere.path().join("ffmpeg.exe"), b"ffmpeg").unwrap();
+        assert_eq!(strict_bundled_ffmpeg_for_executable(&executable), None);
+    }
 }

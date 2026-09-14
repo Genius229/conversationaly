@@ -8,6 +8,28 @@ publish = false
 [workspace]
 
 [[test]]
+name = "directshow_device"
+path = "../../frontend/src-tauri/tests/directshow_device.rs"
+
+[[test]]
+name = "directshow_wiring"
+path = "../../frontend/src-tauri/tests/directshow_wiring.rs"
+
+[[test]]
+name = "directshow_ffmpeg"
+path = "../../frontend/src-tauri/tests/directshow_ffmpeg.rs"
+
+[[test]]
+name = "directshow_capture"
+path = "../../frontend/src-tauri/tests/directshow_capture.rs"
+required-features = ["gigastt-test-fixtures"]
+
+[[bin]]
+name = "fake-ffmpeg-capture"
+path = "../../frontend/src-tauri/tests/support/fake_ffmpeg_capture.rs"
+required-features = ["gigastt-test-fixtures"]
+
+[[test]]
 name = "capture_negotiation"
 path = "../../frontend/src-tauri/tests/capture_negotiation.rs"
 
@@ -35,7 +57,7 @@ gigastt-test-fixtures = []
 [target.'cfg(windows)'.dependencies]
 anyhow = "1.0"
 cpal = "=0.18.1"
-windows = "=0.61.3"
+windows = { version = "=0.61.3", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security"] }
 windows-core = "=0.61.2"
 
 [[test]]
@@ -55,6 +77,7 @@ name = "app_lib"
 path = "lib.rs"
 
 [dependencies]
+anyhow = "1.0"
 sha2 = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

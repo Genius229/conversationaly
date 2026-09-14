@@ -856,6 +856,12 @@ pub fn run() {
                 tauri::RunEvent::Exit => {
                     log::info!("Application exiting, cleaning up resources...");
                     tauri::async_runtime::block_on(async {
+                        // Static globals are not reliably dropped on exit.
+                        // Drain only the externally owned microphone; ordinary
+                        // CPAL Exit behavior remains unchanged.
+                        #[cfg(target_os = "windows")]
+                        audio::recording_commands::cleanup_on_exit().await;
+
                         // Join post-transcription work before closing its DB or process.
                         if let Some(jobs) = _app_handle.try_state::<audio::post_transcription::commands::PostTranscriptionJobs>() {
                             jobs.close().await;

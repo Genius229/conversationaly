@@ -21,6 +21,9 @@ pub enum StreamBackend {
     CoreAudio {
         task: Option<tokio::task::JoinHandle<()>>,
     },
+    /// Owned FFmpeg/DirectShow microphone fallback (Windows startup only).
+    #[cfg(target_os = "windows")]
+    DirectShow(super::directshow::DirectShowCapture),
 }
 
 // SAFETY: While Stream doesn't implement Send, we ensure it's only accessed
@@ -55,11 +58,22 @@ impl AudioStream {
         device_type: DeviceType,
         backend_type: AudioCaptureBackend,
     ) -> Result<Self> {
+        Self::create_with_backend_policy(device, state, device_type, backend_type, true).await
+    }
+
+    async fn create_with_backend_policy(
+        device: Arc<AudioDevice>,
+        state: Arc<RecordingState>,
+        device_type: DeviceType,
+        backend_type: AudioCaptureBackend,
+        allow_directshow: bool,
+    ) -> Result<Self> {
         info!("🎵 Stream: Creating audio stream for device: {} with backend: {:?}, device_type: {:?}",
               device.name, backend_type, device_type);
 
-        // For system audio devices, use the selected backend
-        // For microphone devices, always use CPAL
+        // System audio may use the selected native backend. Microphones try
+        // CPAL first; Windows may use DirectShow only after a narrowly eligible
+        // CPAL startup failure on the exact selected input.
         #[cfg(target_os = "macos")]
         let use_core_audio = device_type == DeviceType::System
             && backend_type == AudioCaptureBackend::CoreAudio;
@@ -84,7 +98,8 @@ impl AudioStream {
             return Self::create_core_audio_stream(device, state, device_type).await;
         }
 
-        // Default path: use CPAL
+        // Default path: CPAL. A working stream returns without DirectShow
+        // enumeration or process work.
         #[cfg(target_os = "macos")]
         let backend_name = if backend_type == AudioCaptureBackend::ScreenCaptureKit {
             "ScreenCaptureKit"
@@ -96,7 +111,7 @@ impl AudioStream {
         let backend_name = "CPAL";
 
         info!("🎵 Stream: Using CPAL backend ({}) for device: {}", backend_name, device.name);
-        Self::create_cpal_stream(device, state, device_type).await
+        Self::create_cpal_stream(device, state, device_type, allow_directshow).await
     }
 
     /// Create a CPAL-based stream (ScreenCaptureKit on macOS)
@@ -104,6 +119,7 @@ impl AudioStream {
         device: Arc<AudioDevice>,
         state: Arc<RecordingState>,
         device_type: DeviceType,
+        allow_directshow: bool,
     ) -> Result<Self> {
         info!("Creating CPAL stream for device: {}", device.name);
 
@@ -129,10 +145,64 @@ impl AudioStream {
             Self::build_stream(&cpal_device, candidate, capture)
         };
         #[cfg(target_os = "windows")]
-        let (stream, selected) = super::capture_windows::open(
+        let (stream, selected) = match super::capture_windows::open(
             &cpal_device, config,
             matches!(device.device_type, super::devices::DeviceType::Output), build,
-        )?;
+        ) {
+            Ok(opened) => opened,
+            Err(wasapi_error) => {
+                let microphone_input = device_type == DeviceType::Microphone
+                    && matches!(device.device_type, super::devices::DeviceType::Input);
+                if !super::capture_windows::directshow_startup_allowed(
+                    allow_directshow,
+                    microphone_input,
+                    &wasapi_error,
+                ) {
+                    return Err(wasapi_error);
+                }
+
+                let Some(exact_name) = super::capture_windows::confirmed_unique_input_name(
+                    &cpal_device,
+                    &device.name,
+                ) else {
+                    warn!("capture_fallback backend=DirectShow result=skipped reason=cpal_name_not_exact_unique");
+                    return Err(wasapi_error);
+                };
+                let Some(ffmpeg_path) = super::ffmpeg::find_bundled_ffmpeg_path_strict() else {
+                    error!("capture_fallback backend=DirectShow result=error reason=bundled_ffmpeg_missing");
+                    return Err(wasapi_error.context(
+                        "DirectShow fallback requires bundled ffmpeg.exe next to the application",
+                    ));
+                };
+
+                warn!("capture_fallback backend=DirectShow reason=eligible_wasapi_startup_failure exact_unique=true");
+                let capture = AudioCapture::new(
+                    device.clone(), state.clone(), super::directshow::OUTPUT_RATE,
+                    super::directshow::OUTPUT_CHANNELS, device_type,
+                );
+                let error_capture = capture.clone();
+                let directshow = super::directshow::DirectShowCapture::start(
+                    ffmpeg_path,
+                    exact_name,
+                    move |pcm| capture.process_audio_data(pcm),
+                    move |message| {
+                        error!("capture_runtime backend=DirectShow result=error {message}");
+                        error_capture.handle_stream_error(cpal::Error::with_message(
+                            cpal::ErrorKind::BackendError,
+                            format!("DirectShow capture: {message}"),
+                        ));
+                    },
+                ).await.map_err(|error| anyhow::anyhow!(
+                    "DirectShow microphone fallback failed after eligible WASAPI startup rejection: {error}"
+                ))?;
+                info!("capture_start backend=DirectShow rate={} channels={} result=ok",
+                    super::directshow::OUTPUT_RATE, super::directshow::OUTPUT_CHANNELS);
+                return Ok(Self {
+                    device,
+                    backend: StreamBackend::DirectShow(directshow),
+                });
+            }
+        };
         #[cfg(not(target_os = "windows"))]
         let stream = build(&config)?;
 
@@ -325,6 +395,14 @@ impl AudioStream {
                     info!("Core Audio task aborted");
                 }
             }
+            #[cfg(target_os = "windows")]
+            StreamBackend::DirectShow(capture) => {
+                // Managed shutdown extracts this backend and awaits finish().
+                // This synchronous API is only the Drop/emergency backstop.
+                capture.request_stop();
+                drop(capture);
+                warn!("DirectShow stream used emergency non-draining stop");
+            }
         }
 
         // Explicitly drop self.device Arc reference
@@ -359,14 +437,39 @@ impl AudioStreamManager {
         microphone_device: Option<Arc<AudioDevice>>,
         system_device: Option<Arc<AudioDevice>>,
     ) -> Result<()> {
+        self.start_streams_inner(microphone_device, system_device, true).await
+    }
+
+    /// Reconnection is CPAL-only: switching a live recording onto an external
+    /// process is a startup policy, never a runtime recovery policy.
+    pub(super) async fn start_streams_without_fallback(
+        &mut self,
+        microphone_device: Option<Arc<AudioDevice>>,
+        system_device: Option<Arc<AudioDevice>>,
+    ) -> Result<()> {
+        self.start_streams_inner(microphone_device, system_device, false).await
+    }
+
+    async fn start_streams_inner(
+        &mut self,
+        microphone_device: Option<Arc<AudioDevice>>,
+        system_device: Option<Arc<AudioDevice>>,
+        allow_directshow: bool,
+    ) -> Result<()> {
         use super::capture::get_current_backend;
         let backend = get_current_backend();
         info!("🎙️ Starting audio streams with backend: {:?}", backend);
 
         // Start microphone stream
         if let Some(mic_device) = microphone_device {
-            info!("🎤 Creating microphone stream: {} (always uses CPAL)", mic_device.name);
-            match AudioStream::create(mic_device.clone(), self.state.clone(), DeviceType::Microphone).await {
+            #[cfg(target_os = "windows")]
+            info!("🎤 Creating microphone stream: {} (CPAL primary; eligible Windows startup fallback enabled)", mic_device.name);
+            #[cfg(not(target_os = "windows"))]
+            info!("🎤 Creating microphone stream: {} (CPAL)", mic_device.name);
+            match AudioStream::create_with_backend_policy(
+                mic_device.clone(), self.state.clone(), DeviceType::Microphone,
+                backend, allow_directshow,
+            ).await {
                 Ok(stream) => {
                     self.state.set_microphone_device(mic_device);
                     self.microphone_stream = Some(stream);
@@ -384,7 +487,10 @@ impl AudioStreamManager {
         // Start system audio stream
         if let Some(sys_device) = system_device {
             info!("🔊 Creating system audio stream: {} (backend: {:?})", sys_device.name, backend);
-            match AudioStream::create(sys_device.clone(), self.state.clone(), DeviceType::System).await {
+            match AudioStream::create_with_backend_policy(
+                sys_device.clone(), self.state.clone(), DeviceType::System,
+                backend, allow_directshow,
+            ).await {
                 Ok(stream) => {
                     self.state.set_system_device(sys_device);
                     self.system_stream = Some(stream);
@@ -435,6 +541,62 @@ impl AudioStreamManager {
             info!("All audio streams stopped successfully");
             Ok(())
         }
+    }
+
+    /// Whether the selected microphone is the owned external capture backend.
+    pub fn has_directshow_microphone(&self) -> bool {
+        #[cfg(target_os = "windows")]
+        {
+            matches!(
+                self.microphone_stream.as_ref().map(|stream| &stream.backend),
+                Some(StreamBackend::DirectShow(_))
+            )
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            false
+        }
+    }
+
+    /// Stop capture while preserving the DirectShow microphone tail.
+    /// CPAL-only sessions use the unchanged synchronous stop path.
+    pub async fn stop_streams_and_drain(&mut self) -> Result<()> {
+        #[cfg(target_os = "windows")]
+        if self.has_directshow_microphone() {
+            let (device, directshow) = match self.microphone_stream.take() {
+                Some(AudioStream {
+                    device,
+                    backend: StreamBackend::DirectShow(directshow),
+                }) => (device, directshow),
+                _ => unreachable!("DirectShow microphone presence was checked"),
+            };
+
+            directshow.request_stop();
+            let cpal_result = self.stop_streams();
+            let directshow_result = directshow.finish().await;
+            drop(device);
+
+            let mut errors = Vec::new();
+            if let Err(error) = cpal_result {
+                errors.push(format!("remaining CPAL streams: {error:#}"));
+            }
+            match directshow_result {
+                Ok(report) => info!(
+                    "capture_stop backend=DirectShow graceful={} force_killed={} samples_delivered={}",
+                    report.graceful, report.force_killed, report.samples_delivered
+                ),
+                Err(error) => errors.push(format!("DirectShow drain: {error}")),
+            }
+
+            return if errors.is_empty() {
+                info!("All audio streams stopped successfully after DirectShow drain");
+                Ok(())
+            } else {
+                Err(anyhow::anyhow!("Failed to stop some streams: {}", errors.join("; ")))
+            };
+        }
+
+        self.stop_streams()
     }
 
     /// Get stream count

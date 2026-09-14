@@ -16,16 +16,16 @@
 - Keep working CPAL devices and system capture unchanged. GigaSTT 2.21.0/model assets/settings/database/diarization unchanged; no downloads or new Python/Docker/WSL production dependencies.
 - Resolve the actual CPAL microphone's full friendly name; require an exact unique DirectShow audio match, reject missing/ambiguous names, prefer its associated unique alternative moniker. Never use default input, substring matches or a similarly named camera. No shell command interpolation.
 - Use only an existing FFmpeg, preferably bundled. DirectShow native input defaults; output `pcm_f32le`, mono, 48000 Hz over stdout. Continually drain stderr with a byte bound and emit sanitized categories/counts, not raw monikers/audio/text.
-- Startup is successful only after real aligned finite PCM arrives. Finite enumeration/startup deadlines, cancellation-safe ownership and Drop cleanup. Windows child ownership must also prevent an FFmpeg survivor after parent exit.
+- Startup is successful only after real aligned finite PCM arrives. Finite enumeration/startup deadlines, cancellation-safe ownership and Drop cleanup. Windows Job Object contains the child before readiness, and explicit app-exit cleanup drains it. Sudden parent death in the short spawn-to-job-assignment interval is not claimed atomically covered; assignment failure itself must kill/reap with a deadline.
 - Stop requests FFmpeg `q`, drains final PCM, then reaps; finite grace followed by killing only the owned process. No broad process-name killing. Avoid self-join and cancellation leaks. No temporary audio files.
-- Preserve fallback tail by selectively draining it BEFORE RecordingState clears the pipeline sender. Keep CPAL stop order unchanged; do not fix unrelated recorder time compression/gaps or saver behavior in this task.
+- Preserve fallback tail by selectively draining it BEFORE RecordingState clears the pipeline sender. Keep CPAL stop order unchanged; do not fix unrelated recorder time compression/gaps or saver behavior in this task. Active DirectShow reconnect is rejected with stop-and-start-again guidance; CPAL reconnection explicitly disables DirectShow so no in-recording backend switch or long FFmpeg await is introduced under the legacy manager mutex.
 - Pause continues draining/discarding via existing RecordingState gating, never accumulating paused audio. Do not claim timestamp-perfect pause boundaries or long-duration hardware acceptance without testing.
 - User audio/log archive stays outside Git. Existing untracked BLE report stays untouched in the original checkout. Work in `.worktrees/dshow-fallback`.
 
 ## Planned interfaces
 
-- `audio/directshow/mod.rs`: async `DirectShowCapture::start(path, exact_name, on_pcm, on_error) -> Result<Self>`; sync `stop(self) -> Result<StopReport>`; emergency Drop cancellation. The process owner runs on its own thread/runtime, so synchronous existing stop calls do not deadlock the caller's Tokio executor. `OUTPUT_RATE=48000`, `OUTPUT_CHANNELS=1`.
-- First-packet readiness uses a cancellation-safe owned handle existing before awaiting. A stop/drain helper in AudioStreamManager handles only the DirectShow variant before state closure; normal CPAL remains untouched.
+- `audio/directshow/capture.rs`: async `DirectShowCapture::start(path, exact_name, on_pcm, on_error) -> Result<Self>`; `request_stop(&self)` plus async `finish(self)`/`stop(self)`; emergency Drop cancellation. The process owner runs on its own thread/runtime; finish awaits joining without blocking the caller's Tokio executor. `OUTPUT_RATE=48000`, `OUTPUT_CHANNELS=1`.
+- First-packet readiness uses a cancellation-safe owned handle existing before awaiting. A stop/drain helper extracts the DirectShow microphone, requests stop, synchronously stops remaining CPAL streams, then awaits the owner drain before state closure; CPAL-only stop order remains untouched. App Exit explicitly stops external capture before teardown because static globals are not dropped reliably.
 - `audio/directshow/device.rs`: pure bounded enumeration parser/unique selector and argument construction; testable with hostile/duplicate/Cyrillic fixtures. Exact parser contract to be finalized from FFmpeg source review before implementation.
 - `audio/directshow/owned_child.rs`: Windows Job Object RAII (kill-on-close) and platform-independent worker helper if splitting is useful; no caller-visible raw process handle.
 - Tests use an explicitly injected local fake FFmpeg command, not environment switches in production. Fake binary lives in test support, excluded from release. Runtime tests also exercise real FFmpeg generated audio (not microphone hardware) on Windows.
@@ -33,19 +33,19 @@
 ## Tasks
 
 ### Task 1: Device identity and command contract
-- [ ] Review FFmpeg enumeration source and confirm exact friendly/audio/alternative-name grammar.
-- [ ] Write RED tests: audio vs video, duplicates, missing/empty/malformed names, Cyrillic, quoted names, argument injection, bounded enumeration input.
-- [ ] Implement pure parser/selector/args; GREEN + review.
+- [x] Review FFmpeg enumeration source and confirm exact friendly/audio/alternative-name grammar.
+- [x] Write RED tests: audio vs video, duplicates, missing/empty/malformed names, Cyrillic, quoted names, argument injection, bounded enumeration input.
+- [x] Implement pure parser/selector/args; GREEN 10/10 + independent source review; FFmpeg `none`/`unknown` and context-pairing follow-ups covered.
 
 ### Task 2: Owned DirectShow process and lifecycle
-- [ ] Finalize owner-thread/runtime API with lifecycle review.
-- [ ] RED tests for first PCM gating, startup EOF/hang, cancellation before ready, fragmented PCM, nonfinite/truncated output, stderr flood, unexpected exit, graceful final tail, ignored quit/owned kill, Drop, repeated start/stop, no leaked child.
-- [ ] Implement bounded child owner, parser/read loop and diagnostics; enforce Windows Job Object containment if available, failing cleanly if ownership cannot be established.
+- [x] Finalize owner-thread/runtime API with lifecycle review.
+- [x] RED tests for first PCM gating, startup EOF/hang, cancellation before ready, fragmented PCM, nonfinite/truncated output, stderr flood, unexpected exit, graceful final tail, ignored quit/owned kill, Drop, repeated start/stop, no leaked child.
+- [x] Implement bounded child owner, parser/read loop and diagnostics; enforce Windows Job Object containment if available, failing cleanly if ownership cannot be established.
 - [ ] Test with fake child on Linux/Windows and real generated PCM through bundled FFmpeg in Windows CI; independent review.
 
 ### Task 3: Application wiring and release
 - [ ] Add Windows DirectShow variant and eligible-failure branch. Map the actual resolved name, output rate/channels and errors into existing AudioCapture.
-- [ ] Add selective pre-drain calls to stop/cleanup/reconnect paths. Test routing and stop-order contracts; retain default CPAL behavior.
+- [ ] Add selective pre-drain calls to normal stop/cleanup/Exit paths. Reject active DirectShow reconnect before awaits; keep CPAL reconnect's sync stop and explicitly forbid fallback on reconnect. Test routing and stop-order contracts; retain default CPAL behavior.
 - [ ] Add headless harness/CI hooks; bump app version consistently (1.4.4), unchanged ASR/models.
 - [ ] Full locked contracts/Clippy/frontend/type/build tests; independent final review.
 - [ ] Merge scoped commits back to the release branch, build Windows EXE with existing native/codec/installer gates, publish public preview and SHA256, verify anonymous download, document real-hardware acceptance still pending.

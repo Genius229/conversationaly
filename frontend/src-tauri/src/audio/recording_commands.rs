@@ -193,6 +193,28 @@ async fn abort_started_capture<R: Runtime>(app: &AppHandle<R>, error: &str) {
     crate::tray::update_tray_menu(app);
 }
 
+/// Drain the externally owned Windows microphone before application teardown.
+/// Ordinary CPAL recordings intentionally retain the existing Exit behavior.
+#[cfg(target_os = "windows")]
+pub async fn cleanup_on_exit() {
+    let manager = {
+        let mut manager_guard = RECORDING_MANAGER.lock().unwrap();
+        if manager_guard
+            .as_ref()
+            .is_some_and(|manager| manager.has_directshow_microphone())
+        {
+            manager_guard.take()
+        } else {
+            None
+        }
+    };
+
+    if let Some(mut manager) = manager {
+        info!("Draining DirectShow microphone before application exit");
+        manager.cleanup_external_capture_on_exit().await;
+    }
+}
+
 /// One greppable line per start, at `info!` so it reaches the log file.
 ///
 /// Every remaining latency decision in this area branches on these numbers, so
@@ -1265,8 +1287,15 @@ pub async fn attempt_device_reconnect(
     // Check if recording is active
     {
         let manager_guard = RECORDING_MANAGER.lock().unwrap();
-        if manager_guard.is_none() {
-            return Err("Recording not active".to_string());
+        match manager_guard.as_ref() {
+            None => return Err("Recording not active".to_string()),
+            Some(manager) if manager.has_directshow_microphone() => {
+                return Err(
+                    "DirectShow microphone reconnection is not supported; stop and start recording again"
+                        .to_string(),
+                );
+            }
+            Some(_) => {}
         }
     } // Release lock
 

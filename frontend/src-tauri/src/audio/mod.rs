@@ -10,6 +10,8 @@ pub mod capture;
 pub mod capture_negotiation;
 #[cfg(target_os = "windows")]
 mod capture_windows;
+#[cfg(any(target_os = "windows", feature = "gigastt-test-fixtures"))]
+pub mod directshow;
 pub mod devices;
 pub mod permissions;
 

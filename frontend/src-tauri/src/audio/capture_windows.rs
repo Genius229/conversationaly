@@ -6,7 +6,7 @@ use super::capture_negotiation::{
     MAX_ATTEMPTS,
 };
 use anyhow::{Context, Result};
-use cpal::traits::DeviceTrait;
+use cpal::traits::{DeviceTrait, HostTrait};
 use cpal::{Device, SampleFormat, SupportedStreamConfig, SupportedStreamConfigRange};
 use log::{info, warn};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -62,6 +62,90 @@ fn error_details(error: &anyhow::Error) -> (String, Option<i32>) {
         ),
         None => ("NonCpalError".into(), None),
     }
+}
+
+/// Whether an exhausted WASAPI stream-build failure may enter the DirectShow
+/// microphone fallback. This is intentionally narrower than negotiation:
+/// generic `InvalidInput` must never switch capture backends.
+pub(super) fn directshow_fallback_eligible(error: &anyhow::Error) -> bool {
+    let Some(error) = error.downcast_ref::<cpal::Error>() else {
+        return false;
+    };
+    match error.kind() {
+        cpal::ErrorKind::UnsupportedConfig => true,
+        cpal::ErrorKind::BackendError => {
+            os_error_code(&error.to_string()) == Some(0x80070057_u32 as i32)
+        }
+        _ => false,
+    }
+}
+
+pub(super) fn directshow_startup_allowed(
+    allow_directshow: bool,
+    microphone_input: bool,
+    error: &anyhow::Error,
+) -> bool {
+    allow_directshow && microphone_input && directshow_fallback_eligible(error)
+}
+
+fn unique_exact_input_name<S, E>(
+    requested: &str,
+    names: impl IntoIterator<Item = std::result::Result<S, E>>,
+) -> Option<String>
+where
+    S: AsRef<str>,
+{
+    let mut exact = None;
+    for name in names {
+        let name = name.ok()?;
+        if name.as_ref() == requested {
+            if exact.is_some() {
+                return None;
+            }
+            exact = Some(name.as_ref().to_owned());
+        }
+    }
+    exact
+}
+
+/// Confirm that the endpoint resolved by the legacy lookup is exactly and
+/// uniquely present among WASAPI inputs. Failure is deliberately `None`: the
+/// caller then returns the original CPAL error without attempting DirectShow.
+pub(super) fn confirmed_unique_input_name(device: &Device, requested: &str) -> Option<String> {
+    let actual = match device.description() {
+        Ok(description) => description.name().to_owned(),
+        Err(error) => {
+            warn!("capture_fallback backend=DirectShow result=skipped reason=cpal_description_failed kind={:?}", error.kind());
+            return None;
+        }
+    };
+    if actual != requested {
+        return None;
+    }
+
+    let host = match cpal::host_from_id(cpal::HostId::Wasapi) {
+        Ok(host) => host,
+        Err(error) => {
+            warn!("capture_fallback backend=DirectShow result=skipped reason=wasapi_host_unavailable kind={:?}", error.kind());
+            return None;
+        }
+    };
+    let devices = match host.input_devices() {
+        Ok(devices) => devices,
+        Err(error) => {
+            warn!("capture_fallback backend=DirectShow result=skipped reason=wasapi_input_enumeration_failed kind={:?}", error.kind());
+            return None;
+        }
+    };
+    unique_exact_input_name(
+        &actual,
+        devices.map(|candidate| {
+            candidate
+                .description()
+                .inspect_err(|error| warn!("capture_fallback backend=DirectShow result=skipped reason=wasapi_input_description_failed kind={:?}", error.kind()))
+                .map(|d| d.name().to_owned())
+        }),
+    )
 }
 
 pub(super) fn error_log(error: &anyhow::Error) -> String {
@@ -199,6 +283,62 @@ pub(super) fn open<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn directshow_fallback_accepts_only_unsupported_config_or_backend_e_invalidarg() {
+        let unsupported = anyhow::Error::new(cpal::Error::new(
+            cpal::ErrorKind::UnsupportedConfig,
+        ));
+        assert!(directshow_fallback_eligible(&unsupported));
+        assert!(directshow_startup_allowed(true, true, &unsupported));
+        assert!(!directshow_startup_allowed(false, true, &unsupported));
+        assert!(!directshow_startup_allowed(true, false, &unsupported));
+
+        let invalid_arg = anyhow::Error::new(cpal::Error::with_message(
+            cpal::ErrorKind::BackendError,
+            "audio client rejected config (os error -2147024809)",
+        ));
+        assert!(directshow_fallback_eligible(&invalid_arg));
+        assert!(directshow_fallback_eligible(&invalid_arg.context("all formats exhausted")));
+
+        for error in [
+            cpal::Error::new(cpal::ErrorKind::InvalidInput),
+            cpal::Error::new(cpal::ErrorKind::DeviceBusy),
+            cpal::Error::new(cpal::ErrorKind::PermissionDenied),
+            cpal::Error::with_message(
+                cpal::ErrorKind::BackendError,
+                "access denied (os error -2147024891)",
+            ),
+        ] {
+            assert!(!directshow_fallback_eligible(&anyhow::Error::new(error)));
+        }
+    }
+
+    #[test]
+    fn directshow_name_gate_requires_one_case_sensitive_exact_input() {
+        assert_eq!(
+            unique_exact_input_name::<_, ()>(
+                "USB Microphone",
+                [Ok("USB Microphone"), Ok("USB Microphone 2")],
+            ),
+            Some("USB Microphone".to_owned())
+        );
+        assert_eq!(
+            unique_exact_input_name::<_, ()>(
+                "USB Microphone",
+                [Ok("USB Microphone"), Ok("USB Microphone")],
+            ),
+            None
+        );
+        assert_eq!(
+            unique_exact_input_name::<_, ()>("USB Microphone", [Ok("usb microphone")]),
+            None
+        );
+        assert_eq!(
+            unique_exact_input_name("USB Microphone", [Ok("USB Microphone"), Err(())]),
+            None
+        );
+    }
 
     #[test]
     fn cpal_error_chain_preserves_localized_hresult_and_stage() {
