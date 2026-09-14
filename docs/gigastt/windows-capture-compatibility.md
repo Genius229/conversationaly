@@ -70,3 +70,25 @@ Recorder, install the preview, select the same Speakerphone, try a short
 recording, then send the new `conversationaly.log` regardless of outcome. If
 initialization still fails, use the logged supported configurations and HRESULTs
 to determine the next targeted WASAPI/driver investigation.
+
+## Published artifact and automated evidence
+
+- Public tag: `gigastt-desktop-v1.4.3-preview.1`, target
+  `9a9b3b30e7e86b3fe041751271a2c790215dc38b`.
+- Full Windows run **34840350298 SUCCESS**, artifact **10346356763**.
+  Nine installation/upgrade scenarios, ten bundled-FFmpeg codec tests, both
+  native GigaSTT formatting projections passed.
+- Contracts **34840350176 SUCCESS**: Ubuntu **139**, Windows **136** tests,
+  **80** Windows stress repetitions and Clippy. Includes three Windows tests
+  using the actual CPAL adapter and ten cross-platform negotiation regressions.
+- Local frontend **31**, TypeScript and Next production build passed; independent
+  source review approved. Initial Windows harness lacked direct `anyhow`, fixed
+  in a test-only follow-up without changing the application's dependency graph.
+- Installer **62,316,972 bytes**; SHA256
+  `3d1a277cddcfc545d1c9c0253de74a641d8c1aeb4d2e6e82f177c861c89d6ab1`.
+- EXE and SHA256SUMS downloaded anonymously with `curl -q`, matching the tested
+  artifact and acceptance-harness hash exactly.
+
+[Public EXE](https://github.com/Genius229/conversationaly/releases/download/gigastt-desktop-v1.4.3-preview.1/Conversationaly-GigaSTT-1.4.3-x64-setup.exe)
+
+Hardware status: **awaiting user's Speakerphone log from 1.4.3**.

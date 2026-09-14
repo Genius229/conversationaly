@@ -1,13 +1,25 @@
 # GigaSTT integration — verification ledger
 
-Updated: 2026-09-11. Branch: `feat/gigastt-post-transcription`.
+Updated: 2026-09-14. Branch: `feat/gigastt-post-transcription`.
 
 **Automated integration gates passed:** full Windows Tauri/NSIS build, pinned
 GigaSTT native inference smoke, Windows/Ubuntu contract matrix, Clippy and
 frontend checks. UI/backend reviews approved. Remaining acceptance boundaries
 are listed below; this is an unsigned development build, not a production release.
 
-**Latest public preview: 1.4.2 / GigaSTT 2.21.0.** Punctuation and casing now
+**Latest public diagnostic preview: 1.4.3 / GigaSTT 2.21.0.** Windows capture
+now negotiates supported formats on the same endpoint after format rejection,
+with per-attempt parameters/HRESULTs and first-callback diagnostics. Default
+success remains the fast path. No GigaSTT/model changes or new diarization.
+[Download EXE without login](https://github.com/Genius229/conversationaly/releases/download/gigastt-desktop-v1.4.3-preview.1/Conversationaly-GigaSTT-1.4.3-x64-setup.exe).
+Full Windows run **34840350298 PASS** (`9a9b3b3`), installer artifact
+**10346356763**, nine installer scenarios, ten bundled-codec tests and two
+native formatting checks. Contracts **34840350176 PASS**: Ubuntu 139 / Windows
+136, 80 Windows stress repeats, Clippy. Physical Bluetooth AI Speakerphone
+acceptance is pending; this is not a confirmed hardware-fix claim. See
+`windows-capture-compatibility.md` and `evidence/windows-capture-2026-09-14.json`.
+
+**Previous public preview: 1.4.2 / GigaSTT 2.21.0.** Punctuation and casing now
 come from canonical `result.text`; native diarization was cancelled and is not
 included. Existing model files are reused. For old recordings, explicitly
 re-transcribe to apply formatting without silently overwriting manual edits.

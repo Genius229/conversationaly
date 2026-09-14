@@ -12,15 +12,16 @@ run on `feat/gigastt-post-transcription`.
 Record the run URL and commit SHA. Do not use an artifact from a failed or
 cancelled run. The build is CPU-only, with GigaSTT pinned to 2.21.0.
 
-Latest verified installer (punctuation/casing, GigaSTT 2.21.0, retaining codec and installer fixes):
-[run 34549490986](https://github.com/Genius229/conversationaly/actions/runs/34549490986),
-full native/desktop build and installer commit `b43cfd6`.
-[Public EXE download](https://github.com/Genius229/conversationaly/releases/download/gigastt-desktop-v1.4.2-preview.1/Conversationaly-GigaSTT-1.4.2-x64-setup.exe)
+Latest verified installer (Windows capture compatibility/diagnostics, retaining previous fixes):
+[run 34840350298](https://github.com/Genius229/conversationaly/actions/runs/34840350298),
+full native/desktop build and installer commit `9a9b3b3`.
+[Public EXE download](https://github.com/Genius229/conversationaly/releases/download/gigastt-desktop-v1.4.3-preview.1/Conversationaly-GigaSTT-1.4.3-x64-setup.exe)
 (no GitHub login required; anonymous download/hash verified).
-Installer: `Conversationaly-GigaSTT-1.4.2-x64-setup.exe`.
-SHA256: `e1d012d3a79a4084cd32e5f984f9b6277b61f0b92faf8e2c70276ad7a3b988c0`.
+Installer: `Conversationaly-GigaSTT-1.4.3-x64-setup.exe`.
+SHA256: `3d1a277cddcfc545d1c9c0253de74a641d8c1aeb4d2e6e82f177c861c89d6ab1`.
 All nine real installation/upgrade cases, ten codec tests and both native
-canonical text/casing checks passed. See `formatted-transcripts-verification.md`
+canonical text/casing checks passed. Bluetooth AI Speakerphone verification on
+the user's Windows 11 PC remains pending. See `windows-capture-compatibility.md`
 and `home-installer-verification.md` for evidence and remaining gates.
 
 The CI overlay uses `Conversationaly GigaSTT Dev` and identifier
