@@ -33,6 +33,7 @@ gigastt-test-fixtures = []
 # Compile the actual WASAPI adapter in the Windows gate without Tauri/GTK.
 # Match the desktop's pinned CPAL/windows pair, not its broader registry ranges.
 [target.'cfg(windows)'.dependencies]
+anyhow = "1.0"
 cpal = "=0.18.1"
 windows = "=0.61.3"
 windows-core = "=0.61.2"
