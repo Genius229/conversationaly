@@ -280,8 +280,12 @@ public static class CaptureProbe
         result.StopRequested = true;
         try
         {
-            process.StandardInput.WriteLine("q");
-            process.StandardInput.Flush();
+            // StreamWriter on .NET Framework may emit an encoding preamble on
+            // its first write. FFmpeg's interactive command is byte-oriented:
+            // send exactly ASCII "q\n" through the underlying pipe.
+            byte[] quit = new byte[] { 0x71, 0x0A };
+            process.StandardInput.BaseStream.Write(quit, 0, quit.Length);
+            process.StandardInput.BaseStream.Flush();
         }
         catch (Exception error)
         {

@@ -6,6 +6,11 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ($MyInvocation.InvocationName -ne '.') {
+    # Windows PowerShell 5.1 otherwise uses the active legacy console code
+    # page for redirected output. Make Russian help/result text deterministic.
+    [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
+}
 $script:CaptureDiagnosticsVersion = '1.0.0'
 $script:ExpectedFfmpegSha256 = '5af82a0d4fe2b9eae211b967332ea97edfc51c6b328ca35b827e73eac560dc0d'
 $script:EnumerationByteLimit = 128 * 1024
@@ -258,6 +263,39 @@ function Convert-ProbeResultForReport {
         stopWriteError = $Result.StopWriteError
         jobAssigned = [bool]$Result.JobAssigned
         launchError = $Result.LaunchError
+        skipReason = $Result.SkipReason
+    }
+}
+
+function New-SkippedProbeResult {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][string]$Reason
+    )
+    return [pscustomobject]@{
+        Started = $false
+        Arguments = @($Arguments)
+        StartedAtUtc = $null
+        FinishedAtUtc = $null
+        DurationMilliseconds = 0
+        FirstStdoutByteMilliseconds = $null
+        ExitCode = $null
+        ForcedStop = $false
+        StopRequested = $false
+        TimedOut = $false
+        TotalStdoutBytes = 0
+        TotalStderrBytes = 0
+        RetainedStdout = [byte[]]@()
+        RetainedStderr = [byte[]]@()
+        StdoutTruncated = $false
+        StderrTruncated = $false
+        CleanupComplete = $true
+        CleanupError = $null
+        StopWriteError = $null
+        JobAssigned = $false
+        Outcome = 'skipped_unsafe_selector'
+        LaunchError = $null
+        SkipReason = $Reason
     }
 }
 
@@ -266,7 +304,8 @@ function Invoke-DiagnosticSequence {
     param(
         [Parameter(Mandatory = $true)][string]$FfmpegPath,
         [string]$SelectedName,
-        [scriptblock]$ProbeInvoker
+        [scriptblock]$ProbeInvoker,
+        [scriptblock]$ProgressSink
     )
 
     if ($null -eq $ProbeInvoker) {
@@ -278,8 +317,12 @@ function Invoke-DiagnosticSequence {
             return Invoke-OwnedProcess -FilePath $FilePath -Arguments $Arguments -TimeoutMilliseconds 5000 -RetainStdout:$RetainStdout
         }
     }
+    if ($null -eq $ProgressSink) {
+        $ProgressSink = { param([string]$Message) Write-Host $Message }
+    }
 
     $processes = New-Object Collections.ArrayList
+    & $ProgressSink '[1/6] Проверка версии FFmpeg (до 5 секунд)...'
     $versionResult = & $ProbeInvoker 'version' $FfmpegPath ([string[]]@('-version')) $true
     [void]$processes.Add([pscustomobject]@{ Kind = 'version'; Result = $versionResult; IncludeStdoutText = $true })
     if (-not [string]::IsNullOrWhiteSpace([string]$versionResult.LaunchError)) {
@@ -287,6 +330,7 @@ function Invoke-DiagnosticSequence {
     }
 
     $enumArgs = Get-DShowEnumerationArguments
+    & $ProgressSink '[2/6] Получение точного списка микрофонов (до 5 секунд)...'
     $enumResult = & $ProbeInvoker 'enumeration' $FfmpegPath $enumArgs $false
     [void]$processes.Add([pscustomobject]@{ Kind = 'enumeration'; Result = $enumResult; IncludeStdoutText = $false })
     if (-not [string]::IsNullOrWhiteSpace([string]$enumResult.LaunchError)) {
@@ -297,6 +341,21 @@ function Invoke-DiagnosticSequence {
             Selection = $null
             Processes = @($processes)
             Error = "DirectShow device listing exceeded $script:EnumerationByteLimit bytes"
+        }
+    }
+    if ([bool]$enumResult.TimedOut -or [bool]$enumResult.ForcedStop) {
+        return [pscustomobject]@{
+            Selection = $null
+            Processes = @($processes)
+            Error = 'DirectShow enumeration was stopped before natural completion; identity data is incomplete'
+        }
+    }
+    if ((-not [bool]$enumResult.CleanupComplete) -or
+        (-not [string]::IsNullOrWhiteSpace([string]$enumResult.CleanupError))) {
+        return [pscustomobject]@{
+            Selection = $null
+            Processes = @($processes)
+            Error = 'DirectShow enumeration cleanup was incomplete; identity data is not trusted'
         }
     }
 
@@ -330,44 +389,95 @@ function Invoke-DiagnosticSequence {
     try { $selection = Select-DShowDevice -Devices $devices -ExactName $exactName }
     catch { return [pscustomobject]@{ Selection = $null; Processes = @($processes); Error = $_.Exception.Message } }
 
+    & $ProgressSink ("Выбран микрофон: {0}" -f $selection.FriendlyName)
+
+    $unsafeFriendlyReason = $null
+    if ([string]$selection.FriendlyName -like '*:*') {
+        $unsafeFriendlyReason = 'friendly name contains reserved DirectShow colon selector syntax'
+    }
+
     $identities = @(
-        [pscustomobject]@{ Suffix = 'moniker'; Token = [string]$selection.Moniker },
-        [pscustomobject]@{ Suffix = 'friendly'; Token = [string]$selection.FriendlyName }
+        [pscustomobject]@{ Suffix = 'moniker'; Token = [string]$selection.Moniker; UnsafeReason = $null },
+        [pscustomobject]@{ Suffix = 'friendly'; Token = [string]$selection.FriendlyName; UnsafeReason = $unsafeFriendlyReason }
     )
+    $optionStep = 3
     foreach ($identity in $identities) {
         $kind = 'options-' + $identity.Suffix
         $args = Get-DShowOptionsArguments -Token $identity.Token
-        $result = & $ProbeInvoker $kind $FfmpegPath $args $false
+        $identityLabel = $(if ($identity.Suffix -eq 'moniker') { 'служебного имени' } else { 'видимого имени' })
+        if ($null -ne $identity.UnsafeReason) {
+            & $ProgressSink ("[{0}/6] Проверка форматов {1} пропущена: небезопасный разделитель ':' в имени." -f $optionStep, $identityLabel)
+            $result = New-SkippedProbeResult -Arguments $args -Reason $identity.UnsafeReason
+        } else {
+            & $ProgressSink ("[{0}/6] Проверка форматов {1} (до 5 секунд)..." -f $optionStep, $identityLabel)
+            $result = & $ProbeInvoker $kind $FfmpegPath $args $false
+        }
         [void]$processes.Add([pscustomobject]@{ Kind = $kind; Result = $result; IncludeStdoutText = $false })
+        $optionStep++
     }
+    $captureStep = 5
     foreach ($identity in $identities) {
         $kind = 'capture-' + $identity.Suffix
         $args = Get-DShowCaptureArguments -Token $identity.Token
-        $result = & $ProbeInvoker $kind $FfmpegPath $args $false
+        $identityLabel = $(if ($identity.Suffix -eq 'moniker') { 'служебного имени' } else { 'видимого имени' })
+        if ($null -ne $identity.UnsafeReason) {
+            & $ProgressSink ("[{0}/6] Короткое открытие {1} пропущено: небезопасный разделитель ':' в имени." -f $captureStep, $identityLabel)
+            $result = New-SkippedProbeResult -Arguments $args -Reason $identity.UnsafeReason
+        } else {
+            & $ProgressSink ("[{0}/6] Короткое открытие {1} (до 17 секунд)..." -f $captureStep, $identityLabel)
+            $result = & $ProbeInvoker $kind $FfmpegPath $args $false
+        }
         [void]$processes.Add([pscustomobject]@{ Kind = $kind; Result = $result; IncludeStdoutText = $false })
+        $captureStep++
     }
 
     return [pscustomobject]@{
-        Selection = [pscustomobject]@{ FriendlyName = $selection.FriendlyName; Moniker = $selection.Moniker }
+        Selection = [pscustomobject]@{
+            FriendlyName = $selection.FriendlyName
+            Moniker = $selection.Moniker
+            FriendlySelectorSafe = $null -eq $unsafeFriendlyReason
+            FriendlySelectorSkipReason = $unsafeFriendlyReason
+        }
         Processes = @($processes)
         Error = $null
     }
 }
 
 function Get-DiagnosticOutputParent {
-    $desktop = [Environment]::GetFolderPath('DesktopDirectory')
-    if (-not [string]::IsNullOrWhiteSpace($desktop)) { return $desktop }
-    $documents = [Environment]::GetFolderPath('MyDocuments')
-    if (-not [string]::IsNullOrWhiteSpace($documents)) { return $documents }
-    if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) { return $env:LOCALAPPDATA }
-    throw 'Не удалось определить доступную пользовательскую папку для отчёта.'
+    [CmdletBinding()]
+    param([string[]]$Candidates)
+    if ($null -eq $Candidates -or $Candidates.Count -eq 0) {
+        $Candidates = @(
+            [Environment]::GetFolderPath('DesktopDirectory'),
+            [Environment]::GetFolderPath('MyDocuments'),
+            $env:LOCALAPPDATA
+        )
+    }
+
+    $seen = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($candidate in $Candidates) {
+        if ([string]::IsNullOrWhiteSpace($candidate) -or (-not $seen.Add($candidate))) { continue }
+        $probePath = $null
+        try {
+            New-Item -ItemType Directory -Path $candidate -Force | Out-Null
+            $probePath = Join-Path $candidate ('.capture-diagnostics-write-test-' + [Guid]::NewGuid().ToString('N') + '.tmp')
+            $stream = [IO.File]::Open($probePath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+            $stream.Dispose()
+            Remove-Item -LiteralPath $probePath -Force
+            return $candidate
+        } catch {
+            if ($null -ne $probePath) { Remove-Item -LiteralPath $probePath -Force -ErrorAction SilentlyContinue }
+        }
+    }
+    throw 'Не удалось найти доступную пользовательскую папку для отчёта.'
 }
 
 function Write-DiagnosticArchive {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][string]$OutputParent,
-        [Parameter(Mandatory = $true)]$Report
+        [Parameter(Mandatory = $true)]$Report,
+        [scriptblock]$CompressionInvoker
     )
     New-Item -ItemType Directory -Path $OutputParent -Force | Out-Null
     $name = 'Conversationaly-Capture-Diagnostics-{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), ([Guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -385,8 +495,29 @@ function Write-DiagnosticArchive {
     ) -join [Environment]::NewLine
     [IO.File]::WriteAllText($summaryPath, $summary, (New-Object Text.UTF8Encoding($true)))
     $zipPath = $directory + '.zip'
-    Compress-Archive -Path (Join-Path $directory '*') -DestinationPath $zipPath -CompressionLevel Optimal
-    return [pscustomobject]@{ DirectoryPath = $directory; ReportPath = $reportPath; ZipPath = $zipPath }
+    if ($null -eq $CompressionInvoker) {
+        $CompressionInvoker = {
+            param([string]$SourcePattern, [string]$DestinationPath)
+            Compress-Archive -Path $SourcePattern -DestinationPath $DestinationPath -CompressionLevel Optimal
+        }
+    }
+    $compressionError = $null
+    try {
+        & $CompressionInvoker (Join-Path $directory '*') $zipPath
+        if (-not (Test-Path -LiteralPath $zipPath -PathType Leaf)) {
+            throw 'Команда сжатия не создала ZIP.'
+        }
+    } catch {
+        $compressionError = $_.Exception.Message
+        Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+        $zipPath = $null
+    }
+    return [pscustomobject]@{
+        DirectoryPath = $directory
+        ReportPath = $reportPath
+        ZipPath = $zipPath
+        CompressionError = $compressionError
+    }
 }
 
 function Get-WindowsIdentityRecord {
@@ -474,8 +605,14 @@ function Invoke-CaptureDiagnosticsMain {
             $parent = Get-DiagnosticOutputParent
             $archive = Write-DiagnosticArchive -OutputParent $parent -Report $report
             Write-Host ''
-            Write-Host ('ZIP с результатом: ' + $archive.ZipPath) -ForegroundColor Green
-            Write-Host ('Исходная папка отчёта сохранена: ' + $archive.DirectoryPath)
+            if ([string]::IsNullOrWhiteSpace([string]$archive.CompressionError)) {
+                Write-Host ('ZIP с результатом: ' + $archive.ZipPath) -ForegroundColor Green
+                Write-Host ('Исходная папка отчёта сохранена: ' + $archive.DirectoryPath)
+            } else {
+                Write-Host ('Не удалось создать ZIP: ' + $archive.CompressionError) -ForegroundColor Red
+                Write-Host ('Отчёт сохранён в папке: ' + $archive.DirectoryPath) -ForegroundColor Yellow
+                $exitCode = 1
+            }
         } catch {
             Write-Host ('Не удалось создать ZIP: ' + $_.Exception.Message) -ForegroundColor Red
             $exitCode = 1

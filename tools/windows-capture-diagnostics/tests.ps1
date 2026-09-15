@@ -7,6 +7,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $script:Results = @()
 $script:StartedAt = [DateTime]::UtcNow
+$script:CurrentSkipReason = $null
 $script:TestRoot = Join-Path ([IO.Path]::GetTempPath()) ('capture-diagnostics-tests-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $script:TestRoot -Force | Out-Null
 
@@ -43,14 +44,25 @@ function Assert-ThrowsLike {
 function Invoke-Test {
     param([string]$Name, [scriptblock]$Body)
     $start = [Diagnostics.Stopwatch]::StartNew()
+    $script:CurrentSkipReason = $null
     try {
         & $Body
-        $script:Results += [pscustomobject]@{ name = $Name; passed = $true; milliseconds = $start.ElapsedMilliseconds; error = $null }
-        Write-Host ("PASS {0}" -f $Name)
+        if ($null -ne $script:CurrentSkipReason) {
+            $script:Results += [pscustomobject]@{ name = $Name; status = 'skip'; passed = $null; milliseconds = $start.ElapsedMilliseconds; error = $null; skipReason = $script:CurrentSkipReason }
+            Write-Host ("SKIP {0}: {1}" -f $Name, $script:CurrentSkipReason) -ForegroundColor Yellow
+        } else {
+            $script:Results += [pscustomobject]@{ name = $Name; status = 'pass'; passed = $true; milliseconds = $start.ElapsedMilliseconds; error = $null; skipReason = $null }
+            Write-Host ("PASS {0}" -f $Name)
+        }
     } catch {
-        $script:Results += [pscustomobject]@{ name = $Name; passed = $false; milliseconds = $start.ElapsedMilliseconds; error = $_.Exception.ToString() }
+        $script:Results += [pscustomobject]@{ name = $Name; status = 'fail'; passed = $false; milliseconds = $start.ElapsedMilliseconds; error = $_.Exception.ToString(); skipReason = $null }
         Write-Host ("FAIL {0}: {1}" -f $Name, $_.Exception.Message) -ForegroundColor Red
     }
+}
+
+function Set-TestSkipped {
+    param([Parameter(Mandatory = $true)][string]$Reason)
+    $script:CurrentSkipReason = $Reason
 }
 
 function New-FakeScript {
@@ -132,6 +144,7 @@ Invoke-Test 'diagnostic sequence probes both identities after natural moniker fa
     $enumText = "[dshow @ ctx] `"Exact Mic`" (audio)`n[dshow @ ctx] Alternative name `"@device_cm_{ONE}\wave_{TWO}`"`n"
     $enumBytes = [Text.Encoding]::UTF8.GetBytes($enumText)
     $calls = New-Object Collections.ArrayList
+    $progress = New-Object Collections.ArrayList
     $fakeInvoker = {
         param([string]$Kind, [string]$FilePath, [string[]]$Arguments, [bool]$RetainStdout)
         [void]$calls.Add([pscustomobject]@{ Kind = $Kind; FilePath = $FilePath; Arguments = @($Arguments); RetainStdout = $RetainStdout })
@@ -154,13 +167,17 @@ Invoke-Test 'diagnostic sequence probes both identities after natural moniker fa
             CleanupComplete = $true; CleanupError = $null; JobAssigned = $true; Outcome = $outcome; LaunchError = $null
         }
     }
-    $sequence = Invoke-DiagnosticSequence -FfmpegPath 'C:\fake\ffmpeg.exe' -SelectedName 'Exact Mic' -ProbeInvoker $fakeInvoker
+    $progressSink = { param([string]$Message) [void]$progress.Add($Message) }
+    $sequence = Invoke-DiagnosticSequence -FfmpegPath 'C:\fake\ffmpeg.exe' -SelectedName 'Exact Mic' -ProbeInvoker $fakeInvoker -ProgressSink $progressSink
     Assert-Equal 'Exact Mic' $sequence.Selection.FriendlyName 'selected friendly name'
     Assert-Equal '@device_cm_{ONE}\wave_{TWO}' $sequence.Selection.Moniker 'selected exact moniker'
     Assert-Equal 6 $calls.Count 'version enumeration two options two captures'
     Assert-Equal 'capture-friendly' $calls[5].Kind 'friendly capture still ran after moniker failure'
     Assert-SequenceEqual @(Get-DShowCaptureArguments -Token '@device_cm_{ONE}\wave_{TWO}') @($calls[4].Arguments) 'moniker production capture argv'
     Assert-SequenceEqual @(Get-DShowCaptureArguments -Token 'Exact Mic') @($calls[5].Arguments) 'friendly production capture argv'
+    Assert-True (@($progress | Where-Object { $_ -like '*Выбран микрофон*Exact Mic*' }).Count -eq 1) 'selection progress shown in Russian'
+    Assert-True (@($progress | Where-Object { $_ -like '*служебного имени*до * секунд*' }).Count -ge 1) 'bounded moniker capture progress shown'
+    Assert-True (@($progress | Where-Object { $_ -like '*видимого имени*до * секунд*' }).Count -ge 1) 'bounded friendly capture progress shown'
 }
 
 Invoke-Test 'diagnostic sequence refuses truncated enumeration before selection' {
@@ -192,6 +209,90 @@ Invoke-Test 'diagnostic sequence refuses truncated enumeration before selection'
     Assert-Equal 2 $calls.Count 'no identity probes after truncated enumeration'
 }
 
+Invoke-Test 'diagnostic sequence refuses incomplete enumeration drain' {
+    $enumBytes = [Text.Encoding]::UTF8.GetBytes("[dshow @ x] `"Mic`" (audio)`n[dshow @ x] Alternative name `"@device_cm_x`"`n")
+    $calls = New-Object Collections.ArrayList
+    $fakeInvoker = {
+        param([string]$Kind, [string]$FilePath, [string[]]$Arguments, [bool]$RetainStdout)
+        [void]$calls.Add($Kind)
+        $stderr = $(if ($Kind -eq 'enumeration') { $enumBytes } else { [byte[]]@() })
+        $stdout = $(if ($Kind -eq 'version') { [Text.Encoding]::UTF8.GetBytes('ffmpeg test') } else { [byte[]]@() })
+        [pscustomobject]@{
+            Started = $true; Arguments = @($Arguments); StartedAtUtc = [DateTime]::UtcNow; FinishedAtUtc = [DateTime]::UtcNow
+            DurationMilliseconds = 1; FirstStdoutByteMilliseconds = $null; ExitCode = 0; ForcedStop = $false
+            StopRequested = $false; TimedOut = $false; TotalStdoutBytes = $stdout.Length; TotalStderrBytes = $stderr.Length
+            RetainedStdout = $stdout; RetainedStderr = $stderr; StdoutTruncated = $false; StderrTruncated = $false
+            CleanupComplete = $Kind -ne 'enumeration'; CleanupError = $(if ($Kind -eq 'enumeration') { 'stderr drain failed' } else { $null })
+            StopWriteError = $null; JobAssigned = $true; Outcome = 'natural_exit'; LaunchError = $null
+        }
+    }
+    $sequence = Invoke-DiagnosticSequence -FfmpegPath 'C:\fake\ffmpeg.exe' -SelectedName 'Mic' -ProbeInvoker $fakeInvoker
+    Assert-True ($sequence.Error -like '*cleanup*') 'incomplete drain is an identity error'
+    Assert-Equal 2 $calls.Count 'no selectors run from partial enumeration bytes'
+}
+
+Invoke-Test 'diagnostic sequence refuses timed-out or forced enumeration' {
+    $enumBytes = [Text.Encoding]::UTF8.GetBytes("[dshow @ x] `"Mic`" (audio)`n[dshow @ x] Alternative name `"@device_cm_x`"`n")
+    $modes = @(
+        [pscustomobject]@{ Name = 'timeout'; TimedOut = $true; ForcedStop = $false },
+        [pscustomobject]@{ Name = 'forced stop'; TimedOut = $false; ForcedStop = $true }
+    )
+    foreach ($mode in $modes) {
+        $calls = New-Object Collections.ArrayList
+        $fakeInvoker = {
+            param([string]$Kind, [string]$FilePath, [string[]]$Arguments, [bool]$RetainStdout)
+            [void]$calls.Add($Kind)
+            $stderr = $(if ($Kind -eq 'enumeration') { $enumBytes } else { [byte[]]@() })
+            $stdout = $(if ($Kind -eq 'version') { [Text.Encoding]::UTF8.GetBytes('ffmpeg test') } else { [byte[]]@() })
+            [pscustomobject]@{
+                Started = $true; Arguments = @($Arguments); StartedAtUtc = [DateTime]::UtcNow; FinishedAtUtc = [DateTime]::UtcNow
+                DurationMilliseconds = 1; FirstStdoutByteMilliseconds = $null; ExitCode = 0
+                ForcedStop = $Kind -eq 'enumeration' -and $mode.ForcedStop
+                StopRequested = $false; TimedOut = $Kind -eq 'enumeration' -and $mode.TimedOut
+                TotalStdoutBytes = $stdout.Length; TotalStderrBytes = $stderr.Length
+                RetainedStdout = $stdout; RetainedStderr = $stderr; StdoutTruncated = $false; StderrTruncated = $false
+                CleanupComplete = $true; CleanupError = $null; StopWriteError = $null; JobAssigned = $true
+                Outcome = 'natural_exit'; LaunchError = $null
+            }
+        }
+        $sequence = Invoke-DiagnosticSequence -FfmpegPath 'C:\fake\ffmpeg.exe' -SelectedName 'Mic' -ProbeInvoker $fakeInvoker
+        Assert-True ($sequence.Error -like '*incomplete*') ($mode.Name + ' is an identity error')
+        Assert-Equal 2 $calls.Count ('no selectors run after ' + $mode.Name)
+    }
+}
+
+Invoke-Test 'colon in friendly name never reaches FFmpeg selector grammar' {
+    $unsafeName = 'Mic:audio=Other'
+    $enumText = "[dshow @ x] `"$unsafeName`" (audio)`n[dshow @ x] Alternative name `"@device_cm_safe`"`n"
+    $enumBytes = [Text.Encoding]::UTF8.GetBytes($enumText)
+    $calls = New-Object Collections.ArrayList
+    $fakeInvoker = {
+        param([string]$Kind, [string]$FilePath, [string[]]$Arguments, [bool]$RetainStdout)
+        [void]$calls.Add([pscustomobject]@{ Kind = $Kind; Arguments = @($Arguments) })
+        $stderr = $(if ($Kind -eq 'enumeration') { $enumBytes } else { [byte[]]@() })
+        $stdout = $(if ($Kind -eq 'version') { [Text.Encoding]::UTF8.GetBytes('ffmpeg test') } else { [byte[]]@() })
+        [pscustomobject]@{
+            Started = $true; Arguments = @($Arguments); StartedAtUtc = [DateTime]::UtcNow; FinishedAtUtc = [DateTime]::UtcNow
+            DurationMilliseconds = 1; FirstStdoutByteMilliseconds = $null; ExitCode = 0; ForcedStop = $false
+            StopRequested = $false; TimedOut = $false; TotalStdoutBytes = $stdout.Length; TotalStderrBytes = $stderr.Length
+            RetainedStdout = $stdout; RetainedStderr = $stderr; StdoutTruncated = $false; StderrTruncated = $false
+            CleanupComplete = $true; CleanupError = $null; StopWriteError = $null; JobAssigned = $true
+            Outcome = 'natural_exit'; LaunchError = $null
+        }
+    }
+    $sequence = Invoke-DiagnosticSequence -FfmpegPath 'C:\fake\ffmpeg.exe' -SelectedName $unsafeName -ProbeInvoker $fakeInvoker
+    Assert-Equal 4 $calls.Count 'only version enumeration and two safe moniker probes launch'
+    foreach ($call in $calls) {
+        Assert-True (-not (@($call.Arguments) -contains ('audio=' + $unsafeName))) 'unsafe friendly selector never launched'
+    }
+    $friendlyEntries = @($sequence.Processes | Where-Object { $_.Kind -in @('options-friendly','capture-friendly') })
+    Assert-Equal 2 $friendlyEntries.Count 'both unsafe friendly probes recorded'
+    foreach ($entry in $friendlyEntries) {
+        Assert-Equal 'skipped_unsafe_selector' $entry.Result.Outcome 'unsafe probe outcome'
+        Assert-True ($entry.Result.SkipReason -like '*colon*') 'unsafe reason recorded'
+    }
+}
+
 Invoke-Test 'archive preserves partial JSON without audio artifacts' {
     $out = Join-Path $script:TestRoot 'archive parent with spaces'
     New-Item -ItemType Directory -Path $out -Force | Out-Null
@@ -202,6 +303,25 @@ Invoke-Test 'archive preserves partial JSON without audio artifacts' {
     Assert-Equal 'partial' $json.status 'partial status preserved'
     $audio = @(Get-ChildItem -LiteralPath $archive.DirectoryPath -Recurse -File | Where-Object { $_.Extension -in @('.wav','.pcm','.raw','.f32le','.mp3','.ogg','.m4a') })
     Assert-Equal 0 $audio.Count 'no audio-like file stored'
+}
+
+Invoke-Test 'output location falls back after unwritable candidate' {
+    $notDirectory = Join-Path $script:TestRoot 'blocked-parent'
+    [IO.File]::WriteAllText($notDirectory, 'file blocks directory')
+    $fallback = Join-Path $script:TestRoot 'writable fallback'
+    $selected = Get-DiagnosticOutputParent -Candidates @($notDirectory, $fallback)
+    Assert-Equal $fallback $selected 'first writable candidate selected'
+    Assert-Equal 0 @(Get-ChildItem -LiteralPath $fallback -Force).Count 'writability probe cleaned up'
+}
+
+Invoke-Test 'compression failure returns surviving report directory' {
+    $out = Join-Path $script:TestRoot 'compression failure'
+    $failCompression = { param([string]$SourcePattern, [string]$DestinationPath) throw 'compression blocked for test' }
+    $archive = Write-DiagnosticArchive -OutputParent $out -Report ([ordered]@{ status = 'partial'; error = 'probe failed'; processes = @() }) -CompressionInvoker $failCompression
+    Assert-True (Test-Path -LiteralPath $archive.ReportPath -PathType Leaf) 'report survives compression failure'
+    Assert-True (Test-Path -LiteralPath $archive.DirectoryPath -PathType Container) 'report directory survives compression failure'
+    Assert-True ([string]::IsNullOrWhiteSpace([string]$archive.ZipPath)) 'failed ZIP is not claimed'
+    Assert-True ($archive.CompressionError -like '*compression blocked*') 'compression error returned'
 }
 
 Invoke-Test 'runner preserves Cyrillic spaces quotes and trailing backslashes as argv' {
@@ -215,7 +335,10 @@ $bytes = (New-Object Text.UTF8Encoding($false)).GetBytes($json)
     $result = Invoke-OwnedProcess -FilePath (Get-TestHostPath) -Arguments $all -TimeoutMilliseconds 5000 -RetainStdout
     Assert-Equal 0 $result.ExitCode 'argv child exit'
     $decoded = Convert-StrictUtf8ForTest $result.RetainedStdout
-    $roundTrip = @(ConvertFrom-Json $decoded)
+    # Windows PowerShell 5.1 emits a JSON array from ConvertFrom-Json as one
+    # pipeline object. Assign first, then normalize the actual array value.
+    $parsedRoundTrip = ConvertFrom-Json $decoded
+    $roundTrip = [object[]]$parsedRoundTrip
     Assert-SequenceEqual $special $roundTrip 'argv round trip'
 }
 
@@ -297,7 +420,10 @@ exit 8
 }
 
 Invoke-Test 'capture runner force-stops owned process and descendants' {
-    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { return }
+    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+        Set-TestSkipped 'Windows Job Object behavior is Windows-only'
+        return
+    }
     $fake = New-FakeScript 'forced-stop.ps1' @'
 $hostPath = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
 $child = Start-Process -FilePath $hostPath -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30') -PassThru -WindowStyle Hidden
@@ -319,7 +445,10 @@ Start-Sleep -Seconds 30
 }
 
 Invoke-Test 'real ffmpeg lavfi smoke produces expected discarded byte count' {
-    if ([string]::IsNullOrWhiteSpace($FfmpegPath)) { return }
+    if ([string]::IsNullOrWhiteSpace($FfmpegPath)) {
+        Set-TestSkipped 'No -FfmpegPath was provided'
+        return
+    }
     Assert-True (Test-Path -LiteralPath $FfmpegPath -PathType Leaf) 'provided ffmpeg exists'
     $argv = @('-hide_banner','-nostats','-loglevel','error','-f','lavfi','-i','anullsrc=r=48000:cl=mono','-t','0.25','-ac','1','-ar','48000','-c:a','pcm_f32le','-f','f32le','pipe:1')
     $result = Invoke-OwnedProcess -FilePath $FfmpegPath -Arguments $argv -TimeoutMilliseconds 5000
@@ -343,8 +472,9 @@ Invoke-Test 'unknown collector argument fails' {
     Assert-True ($result.ExitCode -ne 0) 'unknown argument must fail'
 }
 
-$passed = @($script:Results | Where-Object { $_.passed }).Count
-$failed = @($script:Results | Where-Object { -not $_.passed }).Count
+$passed = @($script:Results | Where-Object { $_.status -eq 'pass' }).Count
+$failed = @($script:Results | Where-Object { $_.status -eq 'fail' }).Count
+$skipped = @($script:Results | Where-Object { $_.status -eq 'skip' }).Count
 $summary = [ordered]@{
     schemaVersion = 1
     toolVersion = '1.0.0'
@@ -355,6 +485,7 @@ $summary = [ordered]@{
     ffmpegSmokeRequested = -not [string]::IsNullOrWhiteSpace($FfmpegPath)
     passed = $passed
     failed = $failed
+    skipped = $skipped
     tests = $script:Results
 }
 
@@ -365,6 +496,6 @@ if (-not [string]::IsNullOrWhiteSpace($ReportPath)) {
 }
 
 Remove-Item -LiteralPath $script:TestRoot -Recurse -Force -ErrorAction SilentlyContinue
-Write-Host ("RESULT passed={0} failed={1}" -f $passed, $failed)
+Write-Host ("RESULT passed={0} failed={1} skipped={2}" -f $passed, $failed, $skipped)
 if ($failed -gt 0) { exit 1 }
 exit 0

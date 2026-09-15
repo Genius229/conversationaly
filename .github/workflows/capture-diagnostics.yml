@@ -43,6 +43,7 @@ jobs:
           & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File tools/windows-capture-diagnostics/tests.ps1 -ReportPath $report -FfmpegPath $env:CAPTURE_TEST_FFMPEG
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Validate PowerShell 7
+        if: ${{ !cancelled() && env.CAPTURE_TEST_FFMPEG != '' }}
         shell: pwsh
         run: |
           $report = Join-Path $env:CAPTURE_TEST_ROOT 'powershell7.json'
