@@ -72,6 +72,106 @@ function New-FakeScript {
     return $path
 }
 
+function Get-NativeQReaderPath {
+    if ($null -ne $script:NativeQReaderPath -and (Test-Path -LiteralPath $script:NativeQReaderPath -PathType Leaf)) {
+        return $script:NativeQReaderPath
+    }
+    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+        throw 'Native q reader is only built on Windows'
+    }
+
+    $sourcePath = Join-Path $script:TestRoot 'native-q-reader.cs'
+    $exePath = Join-Path $script:TestRoot 'native-q-reader.exe'
+    $source = @'
+using System;
+using System.Collections.Generic;
+using System.IO;
+
+public static class NativeQReader
+{
+    public static int Main(string[] args)
+    {
+        bool emitData = args.Length == 1 && args[0] == "data";
+        if (emitData)
+        {
+            byte[] output = new byte[] { 1, 2, 3, 4 };
+            Stream stdout = Console.OpenStandardOutput();
+            stdout.Write(output, 0, output.Length);
+            stdout.Flush();
+        }
+
+        Stream stdin = Console.OpenStandardInput();
+        List<byte> received = new List<byte>();
+        while (received.Count < 16)
+        {
+            int value = stdin.ReadByte();
+            if (value < 0)
+                break;
+            received.Add((byte)value);
+            if (value == 0x0A)
+                break;
+        }
+
+        Console.Error.Write("STDIN_HEX=");
+        for (int i = 0; i < received.Count; i++)
+        {
+            if (i != 0)
+                Console.Error.Write("-");
+            Console.Error.Write(received[i].ToString("X2"));
+        }
+        Console.Error.WriteLine();
+
+        bool exact = received.Count == 2 && received[0] == 0x71 && received[1] == 0x0A;
+        if (exact)
+            return 0;
+        return emitData ? 8 : 9;
+    }
+}
+'@
+    [IO.File]::WriteAllText($sourcePath, $source, (New-Object Text.UTF8Encoding($false)))
+    $candidates = @(
+        (Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'),
+        (Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe')
+    )
+    $csc = @($candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1)
+    if ($csc.Count -ne 1) { throw 'Built-in .NET Framework csc.exe was not found' }
+    $cscPath = [string]$csc[0]
+    & $cscPath '/nologo' '/target:exe' ('/out:' + $exePath) $sourcePath
+    if ($LASTEXITCODE -ne 0 -or (-not (Test-Path -LiteralPath $exePath -PathType Leaf))) {
+        throw "Native q reader compilation failed: $LASTEXITCODE"
+    }
+    $script:NativeQReaderPath = $exePath
+    return $exePath
+}
+
+function Get-QReaderInvocation {
+    param([Parameter(Mandatory = $true)][ValidateSet('stall','data')][string]$Mode)
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        return [pscustomobject]@{
+            FilePath = Get-NativeQReaderPath
+            Arguments = @($(if ($Mode -eq 'data') { 'data' } else { 'stall' }))
+        }
+    }
+
+    if ($Mode -eq 'data') {
+        $fake = New-FakeScript 'q-stop.ps1' @'
+$bytes = [byte[]](1, 2, 3, 4)
+[Console]::OpenStandardOutput().Write($bytes, 0, $bytes.Length)
+[Console]::OpenStandardOutput().Flush()
+$line = [Console]::In.ReadLine()
+if ($line -eq 'q') { [Console]::Error.WriteLine('STDIN_HEX=71-0A'); exit 0 }
+exit 8
+'@
+    } else {
+        $fake = New-FakeScript 'startup-stall.ps1' @'
+$line = [Console]::In.ReadLine()
+if ($line -eq 'q') { [Console]::Error.WriteLine('STDIN_HEX=71-0A'); exit 0 }
+exit 9
+'@
+    }
+    return [pscustomobject]@{ FilePath = Get-TestHostPath; Arguments = @(Get-TestHostPrefix $fake) }
+}
+
 function Get-TestHostPath {
     return [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
 }
@@ -391,32 +491,23 @@ Invoke-Test 'capture runner reports natural exit before data' {
 }
 
 Invoke-Test 'capture runner stops startup stall with q' {
-    $fake = New-FakeScript 'startup-stall.ps1' @'
-$line = [Console]::In.ReadLine()
-if ($line -eq 'q') { exit 0 }
-exit 9
-'@
-    $result = Invoke-OwnedCaptureProcess -FilePath (Get-TestHostPath) -Arguments (Get-TestHostPrefix $fake) -FirstDataTimeoutMilliseconds 300 -CaptureAfterFirstDataMilliseconds 100 -QuitGraceMilliseconds 1200 -KillGraceMilliseconds 1000
+    $invocation = Get-QReaderInvocation -Mode 'stall'
+    $result = Invoke-OwnedCaptureProcess -FilePath $invocation.FilePath -Arguments $invocation.Arguments -FirstDataTimeoutMilliseconds 300 -CaptureAfterFirstDataMilliseconds 100 -QuitGraceMilliseconds 1200 -KillGraceMilliseconds 1000
     Assert-Equal 'no_data_timeout' $result.Outcome 'stall outcome'
     Assert-True $result.StopRequested 'q requested after first-data timeout'
     Assert-True (-not $result.ForcedStop) 'q stopped stalled child'
     Assert-Equal 0 $result.ExitCode 'stalled child handled q'
+    Assert-True ((Convert-StrictUtf8ForTest $result.RetainedStderr) -like '*STDIN_HEX=71-0A*') 'native child received exact q bytes'
 }
 
 Invoke-Test 'capture runner sends q after bounded data window' {
-    $fake = New-FakeScript 'q-stop.ps1' @'
-$bytes = [byte[]](1, 2, 3, 4)
-[Console]::OpenStandardOutput().Write($bytes, 0, $bytes.Length)
-[Console]::OpenStandardOutput().Flush()
-$line = [Console]::In.ReadLine()
-if ($line -eq 'q') { exit 0 }
-exit 8
-'@
-    $result = Invoke-OwnedCaptureProcess -FilePath (Get-TestHostPath) -Arguments (Get-TestHostPrefix $fake) -FirstDataTimeoutMilliseconds 1500 -CaptureAfterFirstDataMilliseconds 200 -QuitGraceMilliseconds 1200 -KillGraceMilliseconds 1000
+    $invocation = Get-QReaderInvocation -Mode 'data'
+    $result = Invoke-OwnedCaptureProcess -FilePath $invocation.FilePath -Arguments $invocation.Arguments -FirstDataTimeoutMilliseconds 1500 -CaptureAfterFirstDataMilliseconds 200 -QuitGraceMilliseconds 1200 -KillGraceMilliseconds 1000
     Assert-Equal 'planned_stop_after_data' $result.Outcome 'planned stop outcome'
     Assert-True $result.StopRequested 'q sent'
     Assert-True (-not $result.ForcedStop) 'q avoided kill'
     Assert-Equal 0 $result.ExitCode 'q child exit'
+    Assert-True ((Convert-StrictUtf8ForTest $result.RetainedStderr) -like '*STDIN_HEX=71-0A*') 'native child received exact q bytes'
 }
 
 Invoke-Test 'capture runner force-stops owned process and descendants' {
@@ -455,6 +546,22 @@ Invoke-Test 'real ffmpeg lavfi smoke produces expected discarded byte count' {
     Assert-Equal 0 $result.ExitCode 'lavfi exit'
     Assert-Equal 48000 $result.TotalStdoutBytes '0.25 second mono float32 byte count'
     Assert-Equal 0 $result.RetainedStdout.Length 'lavfi PCM discarded'
+}
+
+Invoke-Test 'real ffmpeg accepts q after paced infinite lavfi capture' {
+    if ([string]::IsNullOrWhiteSpace($FfmpegPath)) {
+        Set-TestSkipped 'No -FfmpegPath was provided'
+        return
+    }
+    Assert-True (Test-Path -LiteralPath $FfmpegPath -PathType Leaf) 'provided ffmpeg exists'
+    $argv = @('-hide_banner','-nostats','-loglevel','error','-re','-f','lavfi','-i','anullsrc=r=48000:cl=mono','-ac','1','-ar','48000','-c:a','pcm_f32le','-f','f32le','pipe:1')
+    $result = Invoke-OwnedCaptureProcess -FilePath $FfmpegPath -Arguments $argv -FirstDataTimeoutMilliseconds 3000 -CaptureAfterFirstDataMilliseconds 250 -QuitGraceMilliseconds 2000 -KillGraceMilliseconds 2000
+    Assert-Equal 'planned_stop_after_data' $result.Outcome 'real ffmpeg planned q outcome'
+    Assert-True $result.StopRequested 'real ffmpeg q requested'
+    Assert-True (-not $result.ForcedStop) 'real ffmpeg accepted q without kill'
+    Assert-Equal 0 $result.ExitCode 'real ffmpeg q exit'
+    Assert-True ($result.TotalStdoutBytes -gt 0) 'real ffmpeg emitted PCM before q'
+    Assert-Equal 0 $result.RetainedStdout.Length 'real ffmpeg PCM discarded'
 }
 
 Invoke-Test 'collector version and help are noninteractive' {
