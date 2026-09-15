@@ -76,6 +76,7 @@ experiments/
 .cursor/
 target/
 .worktrees/
+.superpowers/
 
 frontend/src-tauri/binaries/
 .hallmark/

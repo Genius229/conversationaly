@@ -1,0 +1,67 @@
+name: Windows capture diagnostic kit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/windows-capture-diagnostics]
+    paths:
+      - 'tools/windows-capture-diagnostics/**'
+      - '.github/workflows/capture-diagnostics.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract the already released FFmpeg without installing the app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP 'capture-kit-validation'
+          New-Item -ItemType Directory -Path $root -Force | Out-Null
+          $installer = Join-Path $root 'app-1.4.5.exe'
+          Invoke-WebRequest -Uri 'https://github.com/Genius229/conversationaly/releases/download/gigastt-desktop-v1.4.5-preview.1/Conversationaly-GigaSTT-1.4.5-x64-setup.exe' -OutFile $installer
+          if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'd8ce68460a62abd7fd2550f0eba4c69da27dedf4a2517455ba5f556423b77e89') { throw 'Installer hash mismatch' }
+          $sevenZip = (Get-Command 7z.exe -ErrorAction Stop).Source
+          $extracted = Join-Path $root 'extracted'
+          & $sevenZip x $installer "-o$extracted" '-y' | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "7z failed: $LASTEXITCODE" }
+          $matches = @(Get-ChildItem -LiteralPath $extracted -Recurse -Filter ffmpeg.exe -File)
+          if ($matches.Count -ne 1) { throw 'Expected exactly one bundled FFmpeg' }
+          $ffmpeg = $matches[0].FullName
+          if ((Get-FileHash -LiteralPath $ffmpeg -Algorithm SHA256).Hash.ToLowerInvariant() -ne '5af82a0d4fe2b9eae211b967332ea97edfc51c6b328ca35b827e73eac560dc0d') { throw 'FFmpeg hash mismatch' }
+          "CAPTURE_TEST_FFMPEG=$ffmpeg" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CAPTURE_TEST_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Validate Windows PowerShell 5.1
+        shell: pwsh
+        run: |
+          $report = Join-Path $env:CAPTURE_TEST_ROOT 'powershell51.json'
+          & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File tools/windows-capture-diagnostics/tests.ps1 -ReportPath $report -FfmpegPath $env:CAPTURE_TEST_FFMPEG
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Validate PowerShell 7
+        shell: pwsh
+        run: |
+          $report = Join-Path $env:CAPTURE_TEST_ROOT 'powershell7.json'
+          & pwsh -NoLogo -NoProfile -File tools/windows-capture-diagnostics/tests.ps1 -ReportPath $report -FfmpegPath $env:CAPTURE_TEST_FFMPEG
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Package scripts only
+        shell: pwsh
+        run: |
+          & tools/windows-capture-diagnostics/package.ps1 -SourceCommit $env:GITHUB_SHA -OutputDirectory (Join-Path $env:RUNNER_TEMP 'capture-kit-package')
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capture-diagnostics-validation
+          path: ${{ runner.temp }}/capture-kit-validation/*.json
+          if-no-files-found: warn
+      - name: Upload validated diagnostic kit
+        uses: actions/upload-artifact@v4
+        with:
+          name: conversationaly-capture-diagnostics
+          path: ${{ runner.temp }}/capture-kit-package/*
+          if-no-files-found: error
