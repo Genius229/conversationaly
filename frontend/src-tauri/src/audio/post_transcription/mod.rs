@@ -21,6 +21,7 @@ pub mod native_exports;
 pub mod preview;
 pub mod service;
 pub mod settings;
+mod settings_transaction;
 pub mod tauri_adapter;
 pub mod types;
 pub mod wav;

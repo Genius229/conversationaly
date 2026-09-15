@@ -11,6 +11,12 @@ use serde::{Deserialize, Serialize};
 pub struct PostTranscriptionSettings {
     pub auto_transcribe: bool,
     pub live_preview: bool,
+    #[serde(default = "default_vad_enabled")]
+    pub vad_enabled: bool,
+}
+
+const fn default_vad_enabled() -> bool {
+    true
 }
 
 impl Default for PostTranscriptionSettings {
@@ -18,6 +24,7 @@ impl Default for PostTranscriptionSettings {
         Self {
             auto_transcribe: true,
             live_preview: false,
+            vad_enabled: default_vad_enabled(),
         }
     }
 }

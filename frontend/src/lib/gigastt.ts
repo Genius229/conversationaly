@@ -1,6 +1,7 @@
 export interface GigasttSettings {
   auto_transcribe: boolean;
   live_preview: boolean;
+  vad_enabled: boolean;
 }
 
 export type GigasttSettingsLoadState =
@@ -24,6 +25,27 @@ export interface HomeTranscriptionPresentation {
 export interface GigasttSettingsChannel {
   subscribe(listener: (settings: GigasttSettings) => void): () => void;
   publish(settings: GigasttSettings): void;
+}
+
+export interface GigasttVadControl {
+  checked: boolean;
+  label: string;
+  helpText: string;
+  save(vadEnabled: boolean): Promise<void>;
+}
+
+export function createGigasttVadControl(
+  settings: GigasttSettings,
+  saveSettings: (settings: GigasttSettings) => Promise<void>,
+): GigasttVadControl {
+  return {
+    checked: settings.vad_enabled,
+    label: 'GigaSTT VAD',
+    helpText: 'When on, GigaSTT skips non-speech. Changes apply to the next final transcription, audio import, or re-transcription; a running job keeps its setting. Turn it off to compare missing words.',
+    save(vadEnabled) {
+      return saveSettings({ ...settings, vad_enabled: vadEnabled });
+    },
+  };
 }
 
 /**

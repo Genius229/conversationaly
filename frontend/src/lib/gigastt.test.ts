@@ -6,6 +6,7 @@ const {
   canSummarizeCurrentDraft,
   createGigasttSettingsChannel,
   createGigasttModelInstallAuthority,
+  createGigasttVadControl,
   gigasttCatalogMatches,
   gigasttCatalogView,
   homeTranscriptionPresentation,
@@ -39,15 +40,15 @@ const job = (
 });
 
 test('live model is bypassed only when loaded settings explicitly disable preview', () => {
-  assert.equal(requiresLiveTranscriptionModel({ auto_transcribe: true, live_preview: false }), false);
-  assert.equal(requiresLiveTranscriptionModel({ auto_transcribe: true, live_preview: true }), true);
+  assert.equal(requiresLiveTranscriptionModel({ auto_transcribe: true, live_preview: false, vad_enabled: true }), false);
+  assert.equal(requiresLiveTranscriptionModel({ auto_transcribe: true, live_preview: true, vad_enabled: true }), true);
   assert.equal(requiresLiveTranscriptionModel(null), true);
 });
 
 test('home transcription presentation describes every persisted settings combination honestly', () => {
   assert.deepEqual(
     homeTranscriptionPresentation(
-      { status: 'ready', settings: { auto_transcribe: true, live_preview: false } },
+      { status: 'ready', settings: { auto_transcribe: true, live_preview: false, vad_enabled: true } },
       'parakeet-tdt-0.6b-v3',
     ),
     {
@@ -66,7 +67,7 @@ test('home transcription presentation describes every persisted settings combina
 
   assert.deepEqual(
     homeTranscriptionPresentation(
-      { status: 'ready', settings: { auto_transcribe: true, live_preview: true } },
+      { status: 'ready', settings: { auto_transcribe: true, live_preview: true, vad_enabled: true } },
       'parakeet-tdt-0.6b-v3',
     ),
     {
@@ -85,7 +86,7 @@ test('home transcription presentation describes every persisted settings combina
 
   assert.deepEqual(
     homeTranscriptionPresentation(
-      { status: 'ready', settings: { auto_transcribe: false, live_preview: true } },
+      { status: 'ready', settings: { auto_transcribe: false, live_preview: true, vad_enabled: true } },
       'parakeet-tdt-0.6b-v3',
     ),
     {
@@ -104,7 +105,7 @@ test('home transcription presentation describes every persisted settings combina
 
   assert.deepEqual(
     homeTranscriptionPresentation(
-      { status: 'ready', settings: { auto_transcribe: false, live_preview: false } },
+      { status: 'ready', settings: { auto_transcribe: false, live_preview: false, vad_enabled: true } },
       'parakeet-tdt-0.6b-v3',
     ),
     {
@@ -158,14 +159,45 @@ test('home transcription presentation never guesses a model while settings load 
 
 test('GigaSTT settings channel stops notifying listeners after cleanup', () => {
   const channel = createGigasttSettingsChannel();
-  const received: Array<{ auto_transcribe: boolean; live_preview: boolean }> = [];
+  const received: Array<{ auto_transcribe: boolean; live_preview: boolean; vad_enabled: boolean }> = [];
   const unsubscribe = channel.subscribe(settings => received.push(settings));
 
-  channel.publish({ auto_transcribe: true, live_preview: false });
+  channel.publish({ auto_transcribe: true, live_preview: false, vad_enabled: false });
   unsubscribe();
-  channel.publish({ auto_transcribe: false, live_preview: true });
+  channel.publish({ auto_transcribe: false, live_preview: true, vad_enabled: true });
 
-  assert.deepEqual(received, [{ auto_transcribe: true, live_preview: false }]);
+  assert.deepEqual(received, [{ auto_transcribe: true, live_preview: false, vad_enabled: false }]);
+});
+
+test('GigaSTT VAD control is accessibly labelled and saves a complete settings update', async () => {
+  const channel = createGigasttSettingsChannel();
+  const received: Array<{
+    auto_transcribe: boolean;
+    live_preview: boolean;
+    vad_enabled: boolean;
+  }> = [];
+  channel.subscribe(settings => received.push(settings));
+  const current = {
+    auto_transcribe: false,
+    live_preview: true,
+    vad_enabled: true,
+  };
+  const control = createGigasttVadControl(current, async settings => {
+    channel.publish(settings);
+  });
+
+  assert.equal(control.checked, true);
+  assert.equal(control.label, 'GigaSTT VAD');
+  assert.match(control.helpText, /skips non-speech/i);
+  assert.match(control.helpText, /next final transcription, audio import, or re-transcription/i);
+  assert.match(control.helpText, /missing words/i);
+
+  await control.save(false);
+  assert.deepEqual(received, [{
+    auto_transcribe: false,
+    live_preview: true,
+    vad_enabled: false,
+  }]);
 });
 
 test('automatic post-processing waits for a final transcript and never uses failed draft text', () => {

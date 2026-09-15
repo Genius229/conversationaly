@@ -29,8 +29,10 @@ const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(35);
 #[derive(Debug, Clone)]
 pub struct PostTranscriptionRequest {
     pub meeting_id: String,
+    pub run_id: String,
     pub audio_path: PathBuf,
     pub meeting_dir: PathBuf,
+    pub vad_enabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -220,9 +222,19 @@ impl PostTranscriptionService {
         // wire must resolve within its bound before its accepted job can be
         // cancelled by ID. A timeout/transport loss has no trustworthy ID, so
         // stop the owned server rather than silently abandoning work.
+        let options = SubmitJobOptions {
+            vad: request.vad_enabled,
+            ..SubmitJobOptions::default()
+        };
+        log::info!(
+            "Submitting GigaSTT run {} for meeting {} with vad={}",
+            request.run_id,
+            request.meeting_id,
+            request.vad_enabled
+        );
         let submission = timeout(
             self.request_timeout,
-            client.submit_file(&prepared.path, &SubmitJobOptions::default()),
+            client.submit_file(&prepared.path, &options),
         )
         .await;
         let submitted = match submission {

@@ -7,6 +7,38 @@ fn desktop_profile_defaults_to_post_processing_without_live_model() {
     let settings: PostTranscriptionSettings = serde_json::from_str("{}").unwrap();
     assert!(settings.auto_transcribe);
     assert!(!settings.live_preview);
+    assert!(settings.vad_enabled);
+}
+
+#[test]
+fn old_settings_without_vad_keep_gigastt_vad_enabled() {
+    let settings: PostTranscriptionSettings =
+        serde_json::from_str(r#"{"auto_transcribe":false,"live_preview":true}"#).unwrap();
+
+    assert!(!settings.auto_transcribe);
+    assert!(settings.live_preview);
+    assert!(settings.vad_enabled);
+}
+
+#[test]
+fn explicit_gigastt_vad_modes_survive_serialization_roundtrip() {
+    for vad_enabled in [false, true] {
+        let settings = PostTranscriptionSettings {
+            auto_transcribe: false,
+            live_preview: true,
+            vad_enabled,
+        };
+
+        let json = serde_json::to_string(&settings).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&json).unwrap()["vad_enabled"],
+            vad_enabled
+        );
+        assert_eq!(
+            serde_json::from_str::<PostTranscriptionSettings>(&json).unwrap(),
+            settings
+        );
+    }
 }
 
 #[tokio::test]

@@ -15,6 +15,7 @@ import { Progress } from '@/components/ui/progress';
 import { Switch } from '@/components/ui/switch';
 import {
   canSummarizeCurrentDraft,
+  createGigasttVadControl,
   isGigasttJobActive,
   isGigasttModelReady,
   modelInstallPercent,
@@ -53,6 +54,9 @@ export function GigasttPanel({
   const installPercent = modelInstallPercent(state.modelDownload.progress);
   const canUseDraft = canSummarizeCurrentDraft(state.job ?? null) && hasCurrentTranscript;
   const finalTranscriptNeedsReload = state.job?.state === 'ready' && !state.transcriptReady;
+  const vadControl = state.settings
+    ? createGigasttVadControl(state.settings, state.saveSettings)
+    : null;
 
   const handleSummarizeDraft = async () => {
     setIsSummarizingDraft(true);
@@ -272,6 +276,26 @@ export function GigasttPanel({
                 />
                 Live draft preview
               </label>
+              {vadControl && (
+                <div className="max-w-md">
+                  <label className="flex items-center gap-2 text-xs text-ink-muted">
+                    <Switch
+                      checked={vadControl.checked}
+                      disabled={state.isActing}
+                      onCheckedChange={vadEnabled => void vadControl.save(vadEnabled)}
+                      aria-label={vadControl.label}
+                      aria-describedby="gigastt-vad-help"
+                    />
+                    {vadControl.label}
+                  </label>
+                  <p
+                    id="gigastt-vad-help"
+                    className="mt-1 ps-11 text-2xs leading-relaxed text-ink-faint"
+                  >
+                    {vadControl.helpText}
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </div>

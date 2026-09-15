@@ -331,6 +331,11 @@ async fn launch_meeting<R: Runtime>(
     if jobs.closing.load(Ordering::Acquire) {
         return Err("application is shutting down".into());
     }
+    // Snapshot launch settings before acquiring transcript ownership. A load
+    // failure therefore cannot create a new active or durable job, while
+    // callers with an already-reserved auto/import run retain their existing
+    // cleanup path.
+    let settings = super::settings::load(&app)?;
     let (guard, prepared_sidecar) = match prepared {
         Some(prepared) => (prepared.guard, Some(prepared.sidecar)),
         None => (acquire_job_ownership(&app).await?, None),
@@ -390,6 +395,13 @@ async fn launch_meeting<R: Runtime>(
         progress: PostTranscriptionState::PreparingAudio,
         cleanup_pending: false,
     };
+    let request = PostTranscriptionRequest {
+        meeting_id: meeting_id.clone(),
+        run_id: run_id.clone(),
+        audio_path,
+        meeting_dir,
+        vad_enabled: settings.vad_enabled,
+    };
     let initial = snapshot.clone();
     let cancel = CancellationToken::new();
     let token = cancel.clone();
@@ -426,11 +438,6 @@ async fn launch_meeting<R: Runtime>(
                             },
                         );
                     }
-                };
-                let request = PostTranscriptionRequest {
-                    meeting_id: meeting_id.clone(),
-                    audio_path,
-                    meeting_dir,
                 };
                 let decoder = Arc::new(|path: &std::path::Path| {
                     crate::audio::decoder::decode_audio_file(path)

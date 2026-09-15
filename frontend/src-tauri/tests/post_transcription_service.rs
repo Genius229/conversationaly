@@ -113,10 +113,16 @@ impl Fixture {
     }
 
     fn request(&self) -> PostTranscriptionRequest {
+        self.request_with_vad(true)
+    }
+
+    fn request_with_vad(&self, vad_enabled: bool) -> PostTranscriptionRequest {
         PostTranscriptionRequest {
             meeting_id: "meeting-a".to_string(),
+            run_id: "run-service-test".to_string(),
             audio_path: self.audio_path.clone(),
             meeting_dir: self.meeting_dir.clone(),
+            vad_enabled,
         }
     }
 
@@ -126,6 +132,36 @@ impl Fixture {
             Duration::from_millis(350),
             Duration::from_millis(250),
         )
+    }
+}
+
+#[tokio::test]
+async fn submitted_job_uses_the_snapshotted_vad_mode_in_both_modes() {
+    for vad_enabled in [false, true] {
+        let fixture = Fixture::new(true).await;
+        write_control(&fixture.model_dir, "fake-job-statuses", "done:0");
+
+        fixture
+            .service()
+            .run(
+                fixture.request_with_vad(vad_enabled),
+                decoder(),
+                CancellationToken::new(),
+                |_| {},
+            )
+            .await
+            .unwrap();
+
+        let requests = fs::read_to_string(fixture.model_dir.join("fake-requests")).unwrap();
+        let submission = requests
+            .lines()
+            .find(|line| line.starts_with("POST /v1/jobs?"))
+            .expect("the real service client must submit a job");
+        assert!(
+            submission.contains(&format!("vad={vad_enabled}")),
+            "submission did not preserve vad={vad_enabled}: {submission}"
+        );
+        fixture.sidecar.shutdown().await.unwrap();
     }
 }
 

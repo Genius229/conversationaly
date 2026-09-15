@@ -26,6 +26,8 @@ pub mod onboarding_state;
 pub mod preview;
 #[path = "../../frontend/src-tauri/src/audio/post_transcription/service.rs"]
 pub mod service;
+#[path = "../../frontend/src-tauri/src/audio/post_transcription/settings_transaction.rs"]
+pub mod settings_transaction;
 #[path = "../../frontend/src-tauri/src/audio/post_transcription/types.rs"]
 pub mod types;
 #[path = "../../frontend/src-tauri/src/audio/post_transcription/wav.rs"]
