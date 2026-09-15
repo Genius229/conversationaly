@@ -470,6 +470,18 @@ Invoke-Test 'runner reports launch failure with finite cleanup' {
     Assert-True ($start.ElapsedMilliseconds -lt 3000) 'launch failure remained bounded'
 }
 
+Invoke-Test 'runner restores parent console input encoding after start' {
+    $before = [Console]::InputEncoding
+    $beforePreamble = [BitConverter]::ToString($before.GetPreamble())
+    $fake = New-FakeScript 'encoding-restore.ps1' 'exit 0'
+    $result = Invoke-OwnedProcess -FilePath (Get-TestHostPath) -Arguments (Get-TestHostPrefix $fake) -TimeoutMilliseconds 5000
+    $after = [Console]::InputEncoding
+    Assert-Equal 0 $result.ExitCode 'encoding probe child exit'
+    Assert-Equal $before.CodePage $after.CodePage 'parent input code page restored'
+    Assert-Equal $before.WebName $after.WebName 'parent input encoding name restored'
+    Assert-Equal $beforePreamble ([BitConverter]::ToString($after.GetPreamble())) 'parent input preamble restored'
+}
+
 Invoke-Test 'capture runner discards binary stdout while counting bytes' {
     $fake = New-FakeScript 'binary.ps1' @'
 $bytes = [byte[]](0, 255, 1, 254, 2, 253)
@@ -496,8 +508,9 @@ Invoke-Test 'capture runner stops startup stall with q' {
     Assert-Equal 'no_data_timeout' $result.Outcome 'stall outcome'
     Assert-True $result.StopRequested 'q requested after first-data timeout'
     Assert-True (-not $result.ForcedStop) 'q stopped stalled child'
+    $stdinEvidence = Convert-StrictUtf8ForTest $result.RetainedStderr
+    Assert-True ($stdinEvidence -like '*STDIN_HEX=71-0A*') ("native child received exact q bytes; actual stderr <$stdinEvidence>")
     Assert-Equal 0 $result.ExitCode 'stalled child handled q'
-    Assert-True ((Convert-StrictUtf8ForTest $result.RetainedStderr) -like '*STDIN_HEX=71-0A*') 'native child received exact q bytes'
 }
 
 Invoke-Test 'capture runner sends q after bounded data window' {
@@ -506,8 +519,9 @@ Invoke-Test 'capture runner sends q after bounded data window' {
     Assert-Equal 'planned_stop_after_data' $result.Outcome 'planned stop outcome'
     Assert-True $result.StopRequested 'q sent'
     Assert-True (-not $result.ForcedStop) 'q avoided kill'
+    $stdinEvidence = Convert-StrictUtf8ForTest $result.RetainedStderr
+    Assert-True ($stdinEvidence -like '*STDIN_HEX=71-0A*') ("native child received exact q bytes; actual stderr <$stdinEvidence>")
     Assert-Equal 0 $result.ExitCode 'q child exit'
-    Assert-True ((Convert-StrictUtf8ForTest $result.RetainedStderr) -like '*STDIN_HEX=71-0A*') 'native child received exact q bytes'
 }
 
 Invoke-Test 'capture runner force-stops owned process and descendants' {

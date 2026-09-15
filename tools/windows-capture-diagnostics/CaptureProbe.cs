@@ -28,6 +28,7 @@ public sealed class CaptureProbeResult
     public bool CleanupComplete { get; set; }
     public string CleanupError { get; set; }
     public string StopWriteError { get; set; }
+    public string InputEncodingRestoreError { get; set; }
     public bool JobAssigned { get; set; }
     public string Outcome { get; set; }
     public string LaunchError { get; set; }
@@ -38,6 +39,7 @@ public static class CaptureProbe
     private const int RetainedByteLimit = 128 * 1024;
     private const UInt32 JobObjectExtendedLimitInformationClass = 9;
     private const UInt32 JobObjectLimitKillOnJobClose = 0x00002000;
+    private static readonly object ProcessStartEncodingLock = new object();
 
     private sealed class DrainResult
     {
@@ -308,6 +310,43 @@ public static class CaptureProbe
         WaitUntilExit(process, killGraceMilliseconds);
     }
 
+    private static bool StartWithBomlessStandardInput(Process process, CaptureProbeResult result)
+    {
+        // .NET Framework creates Process.StandardInput during Start with
+        // Console.InputEncoding and immediately enables AutoFlush. That first
+        // flush writes the encoding preamble into the child pipe. Serialize the
+        // short process-start window, select a no-preamble encoding, and always
+        // restore the parent setting; the created StreamWriter retains its own
+        // BOM-less encoding after this method returns.
+        lock (ProcessStartEncodingLock)
+        {
+            Encoding previous = Console.InputEncoding;
+            try
+            {
+                Console.InputEncoding = new UTF8Encoding(false);
+                bool started = process.Start();
+                // Record ownership immediately. A later failure while restoring
+                // the process-global encoding must not make a live child look
+                // unstarted to the outer cleanup path.
+                result.Started = started;
+                return started;
+            }
+            finally
+            {
+                try
+                {
+                    Console.InputEncoding = previous;
+                }
+                catch (Exception error)
+                {
+                    result.InputEncodingRestoreError = error.ToString();
+                    if (result.CleanupError == null)
+                        result.CleanupError = "Console.InputEncoding restore failed: " + error.Message;
+                }
+            }
+        }
+    }
+
     private static CaptureProbeResult RunCore(
         string fileName,
         string[] arguments,
@@ -353,9 +392,8 @@ public static class CaptureProbe
 
             process = new Process();
             process.StartInfo = start;
-            if (!process.Start())
+            if (!StartWithBomlessStandardInput(process, result))
                 throw new InvalidOperationException("Process.Start returned false");
-            result.Started = true;
 
             if (job != IntPtr.Zero)
             {

@@ -261,6 +261,7 @@ function Convert-ProbeResultForReport {
         cleanupComplete = [bool]$Result.CleanupComplete
         cleanupError = $Result.CleanupError
         stopWriteError = $Result.StopWriteError
+        inputEncodingRestoreError = $Result.InputEncodingRestoreError
         jobAssigned = [bool]$Result.JobAssigned
         launchError = $Result.LaunchError
         skipReason = $Result.SkipReason
