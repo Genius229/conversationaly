@@ -8,17 +8,17 @@ prove microphone behavior or recording durability.
 
 Use the `conversationaly-gigastt-windows-unsigned-dev` artifact from a successful
 `GigaSTT desktop Windows check` or `GigaSTT installer repackage and acceptance`
-run on `feat/gigastt-post-transcription`.
+run on the source branch recorded for that release.
 Record the run URL and commit SHA. Do not use an artifact from a failed or
 cancelled run. The build is CPU-only, with GigaSTT pinned to 2.21.0.
 
-Latest verified installer (startup-only DirectShow microphone fallback, retaining previous fixes):
-[run 34894443916](https://github.com/Genius229/conversationaly/actions/runs/34894443916),
-full native/desktop build and installer commit `f11ebab`.
-[Public EXE download](https://github.com/Genius229/conversationaly/releases/download/gigastt-desktop-v1.4.4-preview.1/Conversationaly-GigaSTT-1.4.4-x64-setup.exe)
+Latest verified installer (persisted default-on GigaSTT VAD switch, retaining previous fixes):
+[run 34950116207](https://github.com/Genius229/conversationaly/actions/runs/34950116207),
+full native/desktop build and installer commit `be69605`.
+[Public EXE download](https://github.com/Genius229/conversationaly/releases/download/gigastt-desktop-v1.4.5-preview.1/Conversationaly-GigaSTT-1.4.5-x64-setup.exe)
 (no GitHub login required; anonymous download/hash verified).
-Installer: `Conversationaly-GigaSTT-1.4.4-x64-setup.exe`.
-SHA256: `e9f434bfd41eb7924538f44ab7fb8c629ee42c81a1eedd6f056ece869e693432`.
+Installer: `Conversationaly-GigaSTT-1.4.5-x64-setup.exe`.
+SHA256: `d8ce68460a62abd7fd2550f0eba4c69da27dedf4a2517455ba5f556423b77e89`.
 All nine real installation/upgrade cases, twelve codec/resolver tests and both
 native canonical text/casing checks passed. Bundled FFmpeg DirectShow/PCM-tail
 and Windows child-ownership tests passed. Automatic fallback on the original
@@ -41,6 +41,14 @@ request receive one Retry/Cancel prompt instead of per-DLL Ignore dialogs.
 ## Short functional pass
 
 - [ ] Install and launch on Windows x86-64 without Python, Docker or WSL.
+- [ ] Confirm **GigaSTT VAD** is initially on for an old profile without the
+      setting. Turn it off, restart, and confirm the saved choice remains off.
+- [ ] Re-transcribe the same saved file with VAD off and then on. Verify the
+      effective mode in the log, final text, punctuation and original timestamps.
+      Do not compare different spoken passages as an accuracy benchmark.
+- [ ] Confirm changing VAD does not alter an already-running job or rewrite an
+      existing transcript by itself; an explicit successful re-transcription
+      still replaces text through the normal atomic result path.
 - [ ] On a fresh setup, verify no model download starts automatically. Choose
       **Set up models later**, reach the app, restart and confirm no download
       starts. Existing completed profiles should not be reset just to update.

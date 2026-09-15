@@ -1,13 +1,30 @@
 # GigaSTT integration — verification ledger
 
-Updated: 2026-09-15. Branch: `feat/gigastt-post-transcription`.
+Updated: 2026-09-15. Latest feature branch: `feat/gigastt-vad-toggle`.
 
 **Automated integration gates passed:** full Windows Tauri/NSIS build, pinned
 GigaSTT native inference smoke, Windows/Ubuntu contract matrix, Clippy and
 frontend checks. UI/backend reviews approved. Remaining acceptance boundaries
 are listed below; this is an unsigned development build, not a production release.
 
-**Latest public preview: 1.4.4 / GigaSTT 2.21.0.** Adds a startup-only
+**Latest public preview: 1.4.5 / GigaSTT 2.21.0.** Adds a persisted
+**GigaSTT VAD** switch, default **on** for fresh and existing profiles.
+Each new final transcription/import/retry snapshots the setting; an in-flight
+job keeps its mode. No restart, model replacement, upstream VAD patch or
+Conversationaly VAD substitution is required. Failed settings writes restore
+the previous native cached choice and cancel rejected delayed autosaves.
+[Download EXE without login](https://github.com/Genius229/conversationaly/releases/download/gigastt-desktop-v1.4.5-preview.1/Conversationaly-GigaSTT-1.4.5-x64-setup.exe).
+Windows build **34950116207 PASS** (`be69605`), artifact **10390018880**:
+nine installer cases, twelve real codec/resolver tests, bundled DirectShow
+PCM test, native GigaSTT checks and frontend 32/32. Contracts **34950121016
+PASS**: Windows 181 / Ubuntu 181, 80 Windows lifecycle repeats, Clippy.
+Four built-page browser suites passed with mocked native IPC; the new toggle
+was checked for save/reload/keyboard/error rollback and 1280/720px layout.
+Anonymous EXE download matched the tested SHA256. Target-PC VAD on/off quality
+acceptance remains manual; a local full-ASR comparison is not a measured WER.
+See `vad-toggle.md` and `evidence/windows-vad-toggle-2026-09-15.json`.
+
+**Previous public preview: 1.4.4 / GigaSTT 2.21.0.** Adds a startup-only
 DirectShow microphone fallback for eligible exhausted WASAPI format failures.
 Working CPAL devices, system loopback and ASR/models remain unchanged. Exact
 unique device mapping, first-PCM readiness and bounded owned-child cleanup

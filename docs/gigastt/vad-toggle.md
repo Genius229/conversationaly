@@ -4,7 +4,11 @@ The application setting **GigaSTT VAD** controls speech detection for final
 GigaSTT transcription only. It does not control microphone recording, DirectShow,
 live draft transcription, or Conversationaly's separate VAD.
 
-## Intended behavior
+Public Windows preview: **1.4.5**,
+[download EXE](https://github.com/Genius229/conversationaly/releases/download/gigastt-desktop-v1.4.5-preview.1/Conversationaly-GigaSTT-1.4.5-x64-setup.exe).
+Tested source: `be69605215f791a98decad6d765b46e158adf70d`.
+
+## Behavior
 
 - Default: **on**, including existing settings files that predate this setting.
 - The choice is saved and used by the next final transcription, import, retry

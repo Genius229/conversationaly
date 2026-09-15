@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-09-15",
+  "appVersion": "1.4.5",
+  "gigasttVersion": "2.21.0",
+  "sourceBranch": "feat/gigastt-vad-toggle",
+  "sourceCommit": "be69605215f791a98decad6d765b46e158adf70d",
+  "releaseTag": "gigastt-desktop-v1.4.5-preview.1",
+  "downloadUrl": "https://github.com/Genius229/conversationaly/releases/download/gigastt-desktop-v1.4.5-preview.1/Conversationaly-GigaSTT-1.4.5-x64-setup.exe",
+  "installer": {
+    "filename": "Conversationaly-GigaSTT-1.4.5-x64-setup.exe",
+    "bytes": 62437784,
+    "sha256": "d8ce68460a62abd7fd2550f0eba4c69da27dedf4a2517455ba5f556423b77e89",
+    "artifactId": 10390018880,
+    "anonymousDownloadVerified": true,
+    "checksumFileVerified": true,
+    "acceptanceCasesPassed": 9,
+    "acceptanceTimeouts": 0
+  },
+  "ci": {
+    "desktop": { "runId": 34950116207, "conclusion": "success" },
+    "contracts": { "runId": 34950121016, "conclusion": "success", "windowsPassed": 181, "ubuntuPassed": 181, "windowsLifecycleRepeatsPassed": 80, "ignoredInstallerPathTestsPerPlatform": 1 },
+    "codecs": { "runId": 34950125501, "conclusion": "success", "passed": 12 },
+    "frontendPassed": 32,
+    "bundledFfmpegDirectShowPcmPassed": 1,
+    "bundledCodecResolverPassed": 12,
+    "nativeFormattingChecks": "success",
+    "tauriWindowsAdapterCompiled": true
+  },
+  "localChecks": {
+    "rustPassed": 181,
+    "rustFailed": 0,
+    "rustIgnored": 1,
+    "clippyWarningsDenied": "pass",
+    "typescript": "pass",
+    "nextProductionBuild": "pass",
+    "browserSuites": ["vad-toggle", "catalog", "home-mode", "import-onboarding"],
+    "browserWidths": [1280, 720],
+    "browserBackend": "mocked Tauri IPC on real built pages",
+    "review": "approved after native settings save-failure rollback fix"
+  },
+  "behavior": {
+    "settingsKey": "vad_enabled",
+    "default": true,
+    "missingFieldUpgradeDefault": true,
+    "appliesToNextJobWithoutRestart": true,
+    "inFlightSnapshotImmutable": true,
+    "serverVadRemainsLoaded": true,
+    "gigasttVadWrapperPatched": false,
+    "conversationalyVadSubstituted": false,
+    "modelWeightsChanged": false,
+    "microphoneCaptureChanged": false
+  },
+  "limits": [
+    "Unsigned preview, not a physical target-PC acceptance result.",
+    "The old broad Node glob has one pre-existing test reading an absent stream_worker.rs; the established frontend CI suite passes.",
+    "Local private Linux full-ASR on/off comparisons demonstrate a material VAD effect, not measured word-error rate or universal improvement.",
+    "User audio and transcript outputs are not included in the release or repository."
+  ]
+}
