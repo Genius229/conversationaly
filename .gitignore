@@ -85,3 +85,6 @@ __pycache__/
 
 # Playwright MCP scratch output
 .playwright-mcp/
+
+# Private task ledgers, local probes and diagnostic evidence
+.superpowers/

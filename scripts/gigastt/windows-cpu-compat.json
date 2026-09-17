@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "profile": "cpu-compat-v1",
+  "cpuBaseline": "x86-64",
+  "rustFlags": "-C target-cpu=x86-64",
+  "cargoArguments": ["--no-default-features", "--features", "gigastt-core/ort-load-dynamic"],
+  "ort": {
+    "version": "1.28.2",
+    "apiVersion": 27,
+    "sourceRepository": "https://github.com/microsoft/onnxruntime",
+    "sourceCommit": "33ca9628233dc8f002435e868d4c2e9f82766ca1",
+    "archiveUrl": "https://github.com/microsoft/onnxruntime/releases/download/v1.28.2/onnxruntime-win-x64-1.28.2.zip",
+    "archiveSha256": "c4eedd29489d5feca21866d054638416f3655bf6b18851b3b6b85c8313e95c35",
+    "archiveBytes": 78620837,
+    "archiveRoot": "onnxruntime-win-x64-1.28.2/",
+    "files": [
+      {"source": "lib/onnxruntime.dll", "destination": "onnxruntime.dll", "bytes": 15818040, "sha256": "1becbd71adbf49609d33195e29c9214969db3c3de69c81425bebe5a4b69aef97"},
+      {"source": "lib/onnxruntime_providers_shared.dll", "destination": "onnxruntime_providers_shared.dll", "bytes": 21816, "sha256": "2e3a2a3903f1d4b1b15cd6887593ed2f269cd2b24e3d729fead45406ec9a25ac"},
+      {"source": "LICENSE", "destination": "ONNXRUNTIME-LICENSE.txt", "bytes": 1094, "sha256": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674"},
+      {"source": "ThirdPartyNotices.txt", "destination": "ONNXRUNTIME-ThirdPartyNotices.txt", "bytes": 331175, "sha256": "fb0af774b4d7cffc5b9d046f2aaeade2f37df2f80abf8033c95dfffcc77a8866"}
+    ]
+  }
+}

@@ -9,7 +9,16 @@ on:
       - 'scripts/gigastt/**'
       - 'frontend/src-tauri/tauri.gigastt.windows.conf.json'
   workflow_dispatch:
+    inputs:
+      cpu_compatible:
+        description: Build the separate pre-AVX2 CPU runtime candidate
+        type: boolean
+        default: false
   workflow_call:
+    inputs:
+      cpu_compatible:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -20,13 +29,14 @@ concurrency:
 
 jobs:
   native-build-smoke:
-    name: GigaSTT v2.21.0 Windows x64 CPU
+    name: GigaSTT v2.21.0 Windows x64 CPU${{ inputs.cpu_compatible && ' compatibility candidate' || '' }}
     runs-on: windows-latest
     timeout-minutes: 90
     env:
       GIGASTT_SOURCE_DIR: ${{ github.workspace }}\.gigastt-src
       GIGASTT_RUNTIME_DIR: ${{ github.workspace }}\frontend\src-tauri\binaries\gigastt-runtime
       GIGASTT_MANIFEST: ${{ github.workspace }}\scripts\gigastt\windows-resources.json
+      ORT_DYLIB_PATH: ''
 
     steps:
       - name: Checkout Conversationaly
@@ -99,17 +109,41 @@ jobs:
       - name: Cache GigaSTT Cargo build
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: .gigastt-src -> target
-          shared-key: gigastt-v2.21.0-windows-x64-cpu-rust-1.94.0
+          workspaces: .gigastt-src -> ${{ inputs.cpu_compatible && 'target-cpu-compat' || 'target' }}
+          shared-key: gigastt-v2.21.0-windows-x64-cpu-rust-1.94.0-${{ inputs.cpu_compatible && 'compat-ort1.28.2-v1' || 'legacy' }}
           cache-on-failure: false
+
+      - name: Verify CPU compatibility profile contracts
+        if: inputs.cpu_compatible
+        shell: pwsh
+        run: |
+          ./scripts/gigastt/windows-cpu-compat.tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'CPU compatibility profile tests failed' }
+
+      - name: Download pinned Microsoft CPU ONNX Runtime
+        if: inputs.cpu_compatible
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path $env:RUNNER_TEMP 'onnxruntime-win-x64-1.28.2.zip'
+          Invoke-WebRequest -Uri 'https://github.com/microsoft/onnxruntime/releases/download/v1.28.2/onnxruntime-win-x64-1.28.2.zip' -OutFile $archive
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'c4eedd29489d5feca21866d054638416f3655bf6b18851b3b6b85c8313e95c35') {
+            throw 'Official CPU ONNX Runtime archive hash mismatch'
+          }
+          "GIGASTT_ORT_ARCHIVE=$archive" >> $env:GITHUB_ENV
 
       - name: Build and inventory native runtime
         shell: pwsh
         run: |
+          $extra = @{}
+          if ('${{ inputs.cpu_compatible }}' -eq 'true') {
+            $extra.CpuCompatible = $true
+            $extra.OrtArchivePath = $env:GIGASTT_ORT_ARCHIVE
+          }
           ./scripts/gigastt/windows-build.ps1 `
             -SourceDir $env:GIGASTT_SOURCE_DIR `
             -OutputDir $env:GIGASTT_RUNTIME_DIR `
-            -ManifestPath $env:GIGASTT_MANIFEST
+            -ManifestPath $env:GIGASTT_MANIFEST @extra
 
       - name: Cache pinned model files
         uses: actions/cache@v4
@@ -136,11 +170,9 @@ jobs:
           }
 
           $binary = Join-Path $env:GIGASTT_RUNTIME_DIR $manifest.packaging.binaryName
-          & $binary download `
-            --model-dir $env:GIGASTT_MODEL_DIR `
-            --model-variant rnnt `
-            --skip-diarization `
-            --progress json
+          $downloadArgs = @('download', '--model-dir', $env:GIGASTT_MODEL_DIR, '--model-variant', 'rnnt', '--progress', 'json')
+          if ('${{ inputs.cpu_compatible }}' -ne 'true') { $downloadArgs += '--skip-diarization' }
+          & $binary @downloadArgs
           if ($LASTEXITCODE -ne 0) { throw "Pinned GigaSTT model download failed with exit code $LASTEXITCODE" }
 
           foreach ($file in $manifest.model.mainFiles) {
@@ -250,7 +282,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gigastt-v2.21.0-windows-smoke-evidence
+          name: gigastt-v2.21.0-windows-smoke-evidence${{ inputs.cpu_compatible && '-cpu-compat' || '' }}
           path: ${{ runner.temp }}\gigastt-windows-evidence
           if-no-files-found: warn
           retention-days: 14
@@ -258,7 +290,7 @@ jobs:
       - name: Upload native runtime spike
         uses: actions/upload-artifact@v4
         with:
-          name: gigastt-v2.21.0-windows-x86_64-runtime-spike
+          name: gigastt-v2.21.0-windows-x86_64-runtime-spike${{ inputs.cpu_compatible && '-cpu-compat' || '' }}
           path: frontend/src-tauri/binaries/gigastt-runtime
           if-no-files-found: error
           retention-days: 14

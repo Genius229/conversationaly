@@ -1,0 +1,19 @@
+name: GigaSTT pre-AVX2 runtime candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/gigastt-cpu-compat]
+    paths:
+      - '.github/workflows/gigastt-cpu-compat.yml'
+      - '.github/workflows/gigastt-windows.yml'
+      - 'scripts/gigastt/**'
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    uses: ./.github/workflows/gigastt-windows.yml
+    with:
+      cpu_compatible: true

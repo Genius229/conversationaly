@@ -2,12 +2,16 @@
 param(
     [Parameter(Mandatory = $true)][string]$SourceDir,
     [Parameter(Mandatory = $true)][string]$OutputDir,
-    [string]$ManifestPath = (Join-Path $PSScriptRoot "windows-resources.json")
+    [string]$ManifestPath = (Join-Path $PSScriptRoot "windows-resources.json"),
+    [switch]$CpuCompatible,
+    [string]$OrtArchivePath = '',
+    [string]$CpuCompatibilityManifestPath = (Join-Path $PSScriptRoot 'windows-cpu-compat.json')
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+. (Join-Path $PSScriptRoot 'windows-cpu-compat.ps1')
 
 function Invoke-NativeChecked {
     param(
@@ -40,6 +44,16 @@ if ((Split-Path -Leaf $output) -ne "gigastt-runtime") {
     throw "Refusing to replace unexpected output directory '$output'; leaf must be gigastt-runtime"
 }
 
+$cpuProfile = $null
+$verifiedOrt = $null
+if ($CpuCompatible) {
+    if ([string]::IsNullOrWhiteSpace($OrtArchivePath)) { throw 'CpuCompatible requires OrtArchivePath' }
+    $cpuProfile = Read-CpuCompatibilityProfile -Path $CpuCompatibilityManifestPath
+    $verifiedOrt = Get-VerifiedCpuRuntime -ArchivePath $OrtArchivePath -Profile $cpuProfile
+} elseif (-not [string]::IsNullOrWhiteSpace($OrtArchivePath)) {
+    throw 'OrtArchivePath requires the explicit CpuCompatible switch'
+}
+
 $expectedCommit = [string]$manifest.gigastt.sourceCommit
 $head = (& git -C $source rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $head -ne $expectedCommit) {
@@ -66,7 +80,9 @@ if ($LASTEXITCODE -ne 0 -or $protocVersion -notmatch "\b$([regex]::Escape([strin
     throw "protoc pin mismatch: expected $($manifest.toolchain.protoc), got '$protocVersion'"
 }
 
-$cargoArgs = @($manifest.build.cargoArguments | ForEach-Object { [string]$_ })
+$buildAction = {
+$legacyArgs = @($manifest.build.cargoArguments | ForEach-Object { [string]$_ })
+$cargoArgs = @(Get-CpuProfileBuildArguments -LegacyArguments $legacyArgs -Profile $cpuProfile)
 Write-Host ("Pinned build: cargo {0}" -f ($cargoArgs -join " "))
 Push-Location $source
 try {
@@ -76,7 +92,7 @@ finally {
     Pop-Location
 }
 
-$sourceBinary = Join-Path $source ([string]$manifest.build.binaryRelativePath)
+$sourceBinary = Get-CpuProfileBinaryPath -SourceDir $source -LegacyRelativePath ([string]$manifest.build.binaryRelativePath) -CpuCompatible:$CpuCompatible
 if (-not (Test-Path -LiteralPath $sourceBinary -PathType Leaf)) {
     throw "Build succeeded but binary is missing at $sourceBinary"
 }
@@ -90,6 +106,9 @@ $serveHelp = (& $sourceBinary serve --help) -join "`n"
 if ($LASTEXITCODE -ne 0) {
     throw "gigastt serve --help failed with exit code $LASTEXITCODE"
 }
+
+$topHelp = (& $sourceBinary --help) -join "`n"
+if ($LASTEXITCODE -ne 0 -or $topHelp -notmatch 'serve') { throw 'gigastt --help failed' }
 foreach ($requiredFlag in @(
     "--host",
     "--port",
@@ -122,8 +141,15 @@ Copy-Item -LiteralPath $sourceBinary -Destination $stagedBinary
 # beside gigastt.exe so Windows' normal loader search finds it in Tauri's
 # resource directory.
 $releaseDir = Split-Path -Parent $sourceBinary
-Get-ChildItem -LiteralPath $releaseDir -File -Filter "*.dll" | ForEach-Object {
-    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $output $_.Name)
+if ($CpuCompatible) {
+    # Dynamic ORT produces no cargo-staged native DLLs. Reject stale cache
+    # artifacts instead of accidentally bundling the old AVX2/DirectML path.
+    Assert-CpuCompatibilityReleaseDirectory -Path $releaseDir
+    Write-VerifiedCpuRuntime -Verified $verifiedOrt -OutputDir $output
+} else {
+    Get-ChildItem -LiteralPath $releaseDir -File -Filter "*.dll" | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $output $_.Name)
+    }
 }
 
 $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
@@ -255,6 +281,11 @@ $rawPath = Join-Path $output "dumpbin-dependents.txt"
 # Preserve the pinned upstream's redistribution notices inside the installer,
 # not just on the download page. These are not model/audio runtime artifacts.
 $noticeFiles = @()
+if ($CpuCompatible) {
+    foreach ($name in @('ONNXRUNTIME-LICENSE.txt', 'ONNXRUNTIME-ThirdPartyNotices.txt')) {
+        $noticeFiles += [ordered]@{ name = $name; sha256 = Get-Sha256Lower -Path (Join-Path $output $name) }
+    }
+}
 foreach ($notice in @("LICENSE", "NOTICE")) {
     $noticeSource = Join-Path $SourceDir $notice
     if (-not (Test-Path -LiteralPath $noticeSource -PathType Leaf)) {
@@ -300,6 +331,13 @@ $inventory = [ordered]@{
     importedDlls = @($imports)
     pythonProductionDependency = $false
 }
+if ($CpuCompatible) {
+    $inventory['runtimeProfile'] = $cpuProfile.profile
+    $inventory['rustCpuBaseline'] = $cpuProfile.cpuBaseline
+    $inventory['rustFlags'] = $env:RUSTFLAGS
+    $inventory['onnxruntime'] = $cpuProfile.ort
+    $inventory['preAvx2Validation'] = 'not performed by build script; see separate execution evidence'
+}
 $inventoryPath = Join-Path $output ([string]$manifest.packaging.runtimeInventoryName)
 $inventory | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $inventoryPath -Encoding utf8NoBOM
 
@@ -319,3 +357,10 @@ Write-Host ("WINDOWS BUILD PASS commit={0} binary_sha256={1} packaged_files={2} 
     (Get-Sha256Lower -Path $stagedBinary),
     $packagedFiles.Count,
     $imports.Count)
+}
+
+if ($CpuCompatible) {
+    Invoke-CpuCompatibilityEnvironment -SourceDir $source -Action $buildAction
+} else {
+    & $buildAction
+}
