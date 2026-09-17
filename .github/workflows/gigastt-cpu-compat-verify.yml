@@ -102,24 +102,33 @@ jobs:
             if ((Get-FileHash (Join-Path $env:CPU_MODEL_DIR $file.relativePath) -Algorithm SHA256).Hash.ToLowerInvariant() -ne $file.sha256) { throw "Model hash mismatch: $($file.relativePath)" }
           }
 
-      - name: Prepare pinned Intel SDE and original negative runtime
-        timeout-minutes: 13
+      - name: Prepare pinned Intel SDE using Git Bash tools
+        timeout-minutes: 7
+        shell: bash
+        run: |
+          set -euo pipefail
+          temp="$(cygpath -u "$RUNNER_TEMP")"
+          archive="$temp/sde.tar.xz"
+          root="$temp/intel-sde"
+          # Use the Git/OpenSSL curl and GNU tar toolchain, as in XNNPACK's
+          # Windows SDE jobs, rather than the host Schannel/bsdtar pair.
+          echo 'Downloading hash-pinned Intel SDE with Git curl...'
+          /mingw64/bin/curl.exe --fail --location --silent --show-error --connect-timeout 15 --max-time 180 --retry 1 --retry-all-errors --output "$archive" 'https://downloadmirror.intel.com/924984/sde-external-10.13.1-2026-07-28-win.tar.xz'
+          printf '%s  %s\n' '74e626ede09b0baa5011fc9e51b58627ea92c3fc0bae5fd7db34b490f335f651' "$archive" | sha256sum -c -
+          echo 'Extracting verified Intel SDE with GNU tar...'
+          mkdir -p "$root"
+          /usr/bin/tar.exe -xf "$archive" -C "$root"
+          sde="$root/sde-external-10.13.1-2026-07-28-win/sde.exe"
+          test -f "$sde"
+          echo "CPU_SDE=$(cygpath -w "$sde")" >> "$GITHUB_ENV"
+          echo 'Pinned Intel SDE ready.'
+
+      - name: Prepare original negative runtime
+        timeout-minutes: 7
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $ProgressPreference = 'SilentlyContinue'
-          $sdeArchive = Join-Path $env:RUNNER_TEMP 'sde.tar.xz'
-          Write-Host 'Downloading hash-pinned Intel SDE (bounded curl)...'
-          curl.exe --fail --location --silent --show-error --connect-timeout 15 --max-time 180 --retry 1 --retry-all-errors --output $sdeArchive 'https://downloadmirror.intel.com/924984/sde-external-10.13.1-2026-07-28-win.tar.xz'
-          if ($LASTEXITCODE -ne 0) { throw "SDE download failed: $LASTEXITCODE" }
-          if ((Get-FileHash $sdeArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne '74e626ede09b0baa5011fc9e51b58627ea92c3fc0bae5fd7db34b490f335f651') { throw 'SDE archive hash mismatch' }
-          $sdeRoot = Join-Path $env:RUNNER_TEMP 'intel-sde'
-          New-Item -ItemType Directory -Path $sdeRoot -Force | Out-Null
-          tar -xf $sdeArchive -C $sdeRoot
-          if ($LASTEXITCODE -ne 0) { throw 'SDE extraction failed' }
-          $sde = Join-Path $sdeRoot 'sde-external-10.13.1-2026-07-28-win/sde.exe'
-          if (-not (Test-Path $sde)) { throw 'Pinned SDE executable missing' }
-          "CPU_SDE=$sde" >> $env:GITHUB_ENV
           $installer = Join-Path $env:RUNNER_TEMP 'original-1.4.5.exe'
           Write-Host 'Downloading hash-pinned original negative runtime (bounded curl)...'
           curl.exe --fail --location --silent --show-error --connect-timeout 15 --max-time 180 --retry 1 --retry-all-errors --output $installer 'https://github.com/Genius229/conversationaly/releases/download/gigastt-desktop-v1.4.5-preview.1/Conversationaly-GigaSTT-1.4.5-x64-setup.exe'
