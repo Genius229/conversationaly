@@ -103,11 +103,15 @@ jobs:
           }
 
       - name: Prepare pinned Intel SDE and original negative runtime
+        timeout-minutes: 13
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
           $sdeArchive = Join-Path $env:RUNNER_TEMP 'sde.tar.xz'
-          Invoke-WebRequest 'https://downloadmirror.intel.com/924984/sde-external-10.13.1-2026-07-28-win.tar.xz' -OutFile $sdeArchive
+          Write-Host 'Downloading hash-pinned Intel SDE (bounded curl)...'
+          curl.exe --fail --location --silent --show-error --connect-timeout 15 --max-time 180 --retry 1 --retry-all-errors --output $sdeArchive 'https://downloadmirror.intel.com/924984/sde-external-10.13.1-2026-07-28-win.tar.xz'
+          if ($LASTEXITCODE -ne 0) { throw "SDE download failed: $LASTEXITCODE" }
           if ((Get-FileHash $sdeArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne '74e626ede09b0baa5011fc9e51b58627ea92c3fc0bae5fd7db34b490f335f651') { throw 'SDE archive hash mismatch' }
           $sdeRoot = Join-Path $env:RUNNER_TEMP 'intel-sde'
           New-Item -ItemType Directory -Path $sdeRoot -Force | Out-Null
@@ -117,7 +121,9 @@ jobs:
           if (-not (Test-Path $sde)) { throw 'Pinned SDE executable missing' }
           "CPU_SDE=$sde" >> $env:GITHUB_ENV
           $installer = Join-Path $env:RUNNER_TEMP 'original-1.4.5.exe'
-          Invoke-WebRequest 'https://github.com/Genius229/conversationaly/releases/download/gigastt-desktop-v1.4.5-preview.1/Conversationaly-GigaSTT-1.4.5-x64-setup.exe' -OutFile $installer
+          Write-Host 'Downloading hash-pinned original negative runtime (bounded curl)...'
+          curl.exe --fail --location --silent --show-error --connect-timeout 15 --max-time 180 --retry 1 --retry-all-errors --output $installer 'https://github.com/Genius229/conversationaly/releases/download/gigastt-desktop-v1.4.5-preview.1/Conversationaly-GigaSTT-1.4.5-x64-setup.exe'
+          if ($LASTEXITCODE -ne 0) { throw "Original installer download failed: $LASTEXITCODE" }
           if ((Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'd8ce68460a62abd7fd2550f0eba4c69da27dedf4a2517455ba5f556423b77e89') { throw 'Original installer hash mismatch' }
           $oldRoot = Join-Path $env:RUNNER_TEMP 'original-runtime'
           7z x $installer "-o$oldRoot" -y | Out-Null
