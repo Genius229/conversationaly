@@ -52,6 +52,7 @@ $summary = [ordered]@{
     schemaVersion=1; status='running'; chip='IVB'; hardwareTargetAccepted=$false
     buildRunId=$BuildRunId; buildCommit=$BuildCommit
     validationCommit=$env:GITHUB_SHA
+    testHostOs=[Environment]::OSVersion.VersionString
     binarySha256=(Get-FileHash $binary -Algorithm SHA256).Hash.ToLowerInvariant()
     ortVersion=$profile.ort.version; ortDllSha256=$profile.ort.files[0].sha256
     sdeVersion='10.13.1'; error=$null

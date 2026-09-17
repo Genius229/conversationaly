@@ -19,7 +19,11 @@ permissions:
 
 jobs:
   ivy-bridge:
-    runs-on: windows-latest
+    # Keep the native runtime build on windows-latest, but use Server 2022
+    # for the old-CPU instruction experiment. Modern host loader function
+    # overrides can select CRT code before SDE's emulated CPUID applies.
+    # This changes only the test host; all EXE/DLL instruction checks stay on.
+    runs-on: windows-2022
     timeout-minutes: 70
     env:
       ORT_DYLIB_PATH: ''
