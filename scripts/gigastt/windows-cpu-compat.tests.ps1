@@ -146,3 +146,4 @@ $report = [ordered]@{ passed = $results.Count - $failed; failed = $failed; tests
 if ($ReportPath) { $report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $ReportPath -Encoding utf8 }
 Write-Host "Tests: $($report.passed) passed, $failed failed"
 if ($failed) { exit 1 }
+exit 0
