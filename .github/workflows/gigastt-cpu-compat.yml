@@ -7,13 +7,20 @@ on:
     paths:
       - '.github/workflows/gigastt-cpu-compat.yml'
       - '.github/workflows/gigastt-windows.yml'
+      - '.github/workflows/gigastt-cpu-compat-verify.yml'
       - 'scripts/gigastt/**'
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   runtime:
     uses: ./.github/workflows/gigastt-windows.yml
     with:
       cpu_compatible: true
+  verify-ivy-bridge:
+    needs: runtime
+    uses: ./.github/workflows/gigastt-cpu-compat-verify.yml
+    with:
+      runtime_run_id: ${{ format('{0}', github.run_id) }}

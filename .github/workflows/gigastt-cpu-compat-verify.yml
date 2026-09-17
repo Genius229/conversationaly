@@ -1,0 +1,159 @@
+name: GigaSTT Ivy Bridge instruction gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      runtime_run_id:
+        description: Successful runtime build run ID (must match this exact source commit)
+        type: string
+        default: ''
+  workflow_call:
+    inputs:
+      runtime_run_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  ivy-bridge:
+    runs-on: windows-latest
+    timeout-minutes: 70
+    env:
+      ORT_DYLIB_PATH: ''
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select exact native runtime build evidence
+        id: build
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_RUN: ${{ inputs.runtime_run_id }}
+          SOURCE_BRANCH: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runId = $env:REQUESTED_RUN
+          if ([string]::IsNullOrWhiteSpace($runId)) {
+            $branch = [Uri]::EscapeDataString($env:SOURCE_BRANCH)
+            $listing = gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/gigastt-cpu-compat.yml/runs?branch=$branch&status=success&per_page=5" | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0) { throw 'Runtime build lookup failed' }
+            $exact = @($listing.workflow_runs | Where-Object { $_.head_sha -eq $env:GITHUB_SHA })
+            if ($exact.Count -eq 0) { throw 'No successful runtime build for this exact source commit' }
+            $runId = [string]$exact[0].id
+          }
+          if ($runId -notmatch '^[1-9][0-9]+$') { throw 'Invalid runtime run ID' }
+          $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$runId" | ConvertFrom-Json
+          # When called via needs: runtime, the enclosing run is still in progress.
+          # An external/manual artifact must instead come from a completed success.
+          $sameRun = $runId -eq $env:GITHUB_RUN_ID
+          if ($LASTEXITCODE -ne 0 -or (-not $sameRun -and $run.conclusion -ne 'success') -or $run.head_sha -ne $env:GITHUB_SHA -or $run.head_branch -ne $env:SOURCE_BRANCH -or $run.path -ne '.github/workflows/gigastt-cpu-compat.yml') {
+            throw 'Runtime evidence must match the exact source SHA and compatibility workflow'
+          }
+          "run_id=$runId" >> $env:GITHUB_OUTPUT
+          "commit=$($run.head_sha)" >> $env:GITHUB_OUTPUT
+          "CPU_RUNTIME_DIR=$env:RUNNER_TEMP\cpu-runtime" >> $env:GITHUB_ENV
+          "CPU_EVIDENCE_DIR=$env:RUNNER_TEMP\cpu-evidence" >> $env:GITHUB_ENV
+          "CPU_MODEL_DIR=$env:RUNNER_TEMP\gigastt-model-v2.18.0" >> $env:GITHUB_ENV
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: gigastt-v2.21.0-windows-x86_64-runtime-spike-cpu-compat
+          path: ${{ runner.temp }}/cpu-runtime
+          run-id: ${{ steps.build.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ekhodzitsky/gigastt
+          ref: 5289e8a6b3a67217711e6b5cba6c2f19dec3c5eb
+          path: .gigastt-fixture
+          persist-credentials: false
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\gigastt-model-v2.18.0
+          key: gigastt-v2.18.0-rnnt-int8-windows-x64-c52665e9-punct-b105da02-vad-2623a295
+
+      - name: Prepare hash-pinned public fixture models
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifest = Get-Content scripts/gigastt/windows-resources.json -Raw | ConvertFrom-Json
+          New-Item -ItemType Directory -Path $env:CPU_MODEL_DIR -Force | Out-Null
+          foreach ($file in $manifest.model.mainFiles) {
+            $path = Join-Path $env:CPU_MODEL_DIR $file.relativePath
+            if ((Test-Path $path) -and (Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $file.sha256) { Remove-Item -LiteralPath $path }
+          }
+          & (Join-Path $env:CPU_RUNTIME_DIR 'gigastt.exe') download --model-dir $env:CPU_MODEL_DIR --model-variant rnnt --progress json
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned main-model preparation failed' }
+          foreach ($file in $manifest.model.sideFiles) {
+            $path = Join-Path $env:CPU_MODEL_DIR $file.relativePath
+            New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force | Out-Null
+            if (-not (Test-Path $path) -or (Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $file.sha256) { Invoke-WebRequest $file.url -OutFile $path }
+          }
+          foreach ($file in @($manifest.model.mainFiles) + @($manifest.model.sideFiles)) {
+            if ((Get-FileHash (Join-Path $env:CPU_MODEL_DIR $file.relativePath) -Algorithm SHA256).Hash.ToLowerInvariant() -ne $file.sha256) { throw "Model hash mismatch: $($file.relativePath)" }
+          }
+
+      - name: Prepare pinned Intel SDE and original negative runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sdeArchive = Join-Path $env:RUNNER_TEMP 'sde.tar.xz'
+          Invoke-WebRequest 'https://downloadmirror.intel.com/924984/sde-external-10.13.1-2026-07-28-win.tar.xz' -OutFile $sdeArchive
+          if ((Get-FileHash $sdeArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne '74e626ede09b0baa5011fc9e51b58627ea92c3fc0bae5fd7db34b490f335f651') { throw 'SDE archive hash mismatch' }
+          $sdeRoot = Join-Path $env:RUNNER_TEMP 'intel-sde'
+          New-Item -ItemType Directory -Path $sdeRoot -Force | Out-Null
+          tar -xf $sdeArchive -C $sdeRoot
+          if ($LASTEXITCODE -ne 0) { throw 'SDE extraction failed' }
+          $sde = Join-Path $sdeRoot 'sde-external-10.13.1-2026-07-28-win/sde.exe'
+          if (-not (Test-Path $sde)) { throw 'Pinned SDE executable missing' }
+          "CPU_SDE=$sde" >> $env:GITHUB_ENV
+          $installer = Join-Path $env:RUNNER_TEMP 'original-1.4.5.exe'
+          Invoke-WebRequest 'https://github.com/Genius229/conversationaly/releases/download/gigastt-desktop-v1.4.5-preview.1/Conversationaly-GigaSTT-1.4.5-x64-setup.exe' -OutFile $installer
+          if ((Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'd8ce68460a62abd7fd2550f0eba4c69da27dedf4a2517455ba5f556423b77e89') { throw 'Original installer hash mismatch' }
+          $oldRoot = Join-Path $env:RUNNER_TEMP 'original-runtime'
+          7z x $installer "-o$oldRoot" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Original runtime extraction failed' }
+          $old = @(Get-ChildItem $oldRoot -Recurse -File -Filter gigastt.exe)
+          if ($old.Count -ne 1) { throw 'Expected one original runtime' }
+          "CPU_OLD_RUNTIME=$($old[0].DirectoryName)" >> $env:GITHUB_ENV
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.0
+          targets: x86_64-pc-windows-msvc
+
+      - name: Check gate assertions and compile explicit AVX2 negative control
+        shell: pwsh
+        run: |
+          ./scripts/gigastt/windows-cpu-sde.tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'SDE assertion unit tests failed' }
+          $controlDir = Join-Path $env:RUNNER_TEMP 'avx2-control'
+          New-Item -ItemType Directory -Path $controlDir -Force | Out-Null
+          $control = Join-Path $controlDir 'avx2-control.exe'
+          rustc --edition 2024 -C opt-level=1 -C target-cpu=x86-64 scripts/gigastt/avx2-negative-control.rs -o $control
+          if ($LASTEXITCODE -ne 0) { throw 'Negative control compilation failed' }
+          "CPU_CONTROL=$control" >> $env:GITHUB_ENV
+
+      - name: Enforce IVB instructions across EXE and native runtime DLLs
+        shell: pwsh
+        run: |
+          ./scripts/gigastt/run-windows-cpu-sde.ps1 `
+            -Sde $env:CPU_SDE -RuntimeDir $env:CPU_RUNTIME_DIR `
+            -OldRuntimeDir $env:CPU_OLD_RUNTIME -ControlBinary $env:CPU_CONTROL `
+            -Audio (Join-Path $env:GITHUB_WORKSPACE '.gigastt-fixture/crates/gigastt/tests/fixtures/golos_00.wav') `
+            -ModelDir $env:CPU_MODEL_DIR -EvidenceDir $env:CPU_EVIDENCE_DIR `
+            -BuildRunId '${{ steps.build.outputs.run_id }}' -BuildCommit '${{ steps.build.outputs.commit }}'
+
+      - name: Upload instruction-check evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gigastt-cpu-compat-ivb-evidence
+          path: ${{ runner.temp }}/cpu-evidence
+          if-no-files-found: warn
+          retention-days: 14
