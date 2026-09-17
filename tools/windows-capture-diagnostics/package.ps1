@@ -8,7 +8,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$version = '1.0.0'
+$version = '1.1.0'
 $sourceRoot = $PSScriptRoot
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $sourceRoot '..\..'))
 $head = (& git -C $repoRoot rev-parse HEAD).Trim()

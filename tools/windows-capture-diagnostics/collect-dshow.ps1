@@ -11,7 +11,7 @@ if ($MyInvocation.InvocationName -ne '.') {
     # page for redirected output. Make Russian help/result text deterministic.
     [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
 }
-$script:CaptureDiagnosticsVersion = '1.0.0'
+$script:CaptureDiagnosticsVersion = '1.1.0'
 $script:ExpectedFfmpegSha256 = '5af82a0d4fe2b9eae211b967332ea97edfc51c6b328ca35b827e73eac560dc0d'
 $script:EnumerationByteLimit = 128 * 1024
 
@@ -34,9 +34,20 @@ function Get-DShowOptionsArguments {
 }
 
 function Get-DShowCaptureArguments {
-    param([Parameter(Mandatory = $true)][string]$Token)
+    param(
+        [Parameter(Mandatory = $true)][string]$Token,
+        [string]$Profile = 'default'
+    )
+    $inputOptions = switch ($Profile) {
+        'default' { [string[]]@() }
+        'pcm16-auto' { [string[]]@('-sample_size','16') }
+        'pcm16-48000-mono' { [string[]]@('-sample_rate','48000','-sample_size','16','-channels','1') }
+        default { throw "Unknown capture profile: $Profile" }
+    }
     return [string[]]@(
-        '-hide_banner','-nostats','-loglevel','error','-f','dshow','-i',('audio=' + $Token),
+        '-hide_banner','-nostats','-loglevel','error','-f','dshow'
+        $inputOptions
+        '-i',('audio=' + $Token),
         '-map','0:a:0','-ac','1','-ar','48000','-c:a','pcm_f32le','-f','f32le','pipe:1'
     )
 }
@@ -323,7 +334,7 @@ function Invoke-DiagnosticSequence {
     }
 
     $processes = New-Object Collections.ArrayList
-    & $ProgressSink '[1/6] Проверка версии FFmpeg (до 5 секунд)...'
+    & $ProgressSink '[1/8] Проверка версии FFmpeg (до 5 секунд)...'
     $versionResult = & $ProbeInvoker 'version' $FfmpegPath ([string[]]@('-version')) $true
     [void]$processes.Add([pscustomobject]@{ Kind = 'version'; Result = $versionResult; IncludeStdoutText = $true })
     if (-not [string]::IsNullOrWhiteSpace([string]$versionResult.LaunchError)) {
@@ -331,7 +342,7 @@ function Invoke-DiagnosticSequence {
     }
 
     $enumArgs = Get-DShowEnumerationArguments
-    & $ProgressSink '[2/6] Получение точного списка микрофонов (до 5 секунд)...'
+    & $ProgressSink '[2/8] Получение точного списка микрофонов (до 5 секунд)...'
     $enumResult = & $ProbeInvoker 'enumeration' $FfmpegPath $enumArgs $false
     [void]$processes.Add([pscustomobject]@{ Kind = 'enumeration'; Result = $enumResult; IncludeStdoutText = $false })
     if (-not [string]::IsNullOrWhiteSpace([string]$enumResult.LaunchError)) {
@@ -391,6 +402,7 @@ function Invoke-DiagnosticSequence {
     catch { return [pscustomobject]@{ Selection = $null; Processes = @($processes); Error = $_.Exception.Message } }
 
     & $ProgressSink ("Выбран микрофон: {0}" -f $selection.FriendlyName)
+    & $ProgressSink 'Будет выполнено до четырёх коротких открытий; звуковые данные сохраняться не будут.'
 
     $unsafeFriendlyReason = $null
     if ([string]$selection.FriendlyName -like '*:*') {
@@ -407,10 +419,10 @@ function Invoke-DiagnosticSequence {
         $args = Get-DShowOptionsArguments -Token $identity.Token
         $identityLabel = $(if ($identity.Suffix -eq 'moniker') { 'служебного имени' } else { 'видимого имени' })
         if ($null -ne $identity.UnsafeReason) {
-            & $ProgressSink ("[{0}/6] Проверка форматов {1} пропущена: небезопасный разделитель ':' в имени." -f $optionStep, $identityLabel)
+            & $ProgressSink ("[{0}/8] Проверка форматов {1} пропущена: небезопасный разделитель ':' в имени." -f $optionStep, $identityLabel)
             $result = New-SkippedProbeResult -Arguments $args -Reason $identity.UnsafeReason
         } else {
-            & $ProgressSink ("[{0}/6] Проверка форматов {1} (до 5 секунд)..." -f $optionStep, $identityLabel)
+            & $ProgressSink ("[{0}/8] Проверка форматов {1} (до 5 секунд)..." -f $optionStep, $identityLabel)
             $result = & $ProbeInvoker $kind $FfmpegPath $args $false
         }
         [void]$processes.Add([pscustomobject]@{ Kind = $kind; Result = $result; IncludeStdoutText = $false })
@@ -422,13 +434,33 @@ function Invoke-DiagnosticSequence {
         $args = Get-DShowCaptureArguments -Token $identity.Token
         $identityLabel = $(if ($identity.Suffix -eq 'moniker') { 'служебного имени' } else { 'видимого имени' })
         if ($null -ne $identity.UnsafeReason) {
-            & $ProgressSink ("[{0}/6] Короткое открытие {1} пропущено: небезопасный разделитель ':' в имени." -f $captureStep, $identityLabel)
+            & $ProgressSink ("[{0}/8] Короткое открытие {1} пропущено: небезопасный разделитель ':' в имени." -f $captureStep, $identityLabel)
             $result = New-SkippedProbeResult -Arguments $args -Reason $identity.UnsafeReason
         } else {
-            & $ProgressSink ("[{0}/6] Короткое открытие {1} (до 17 секунд)..." -f $captureStep, $identityLabel)
+            & $ProgressSink ("[{0}/8] Короткое открытие {1} (до 17 секунд)..." -f $captureStep, $identityLabel)
             $result = & $ProbeInvoker $kind $FfmpegPath $args $false
         }
         [void]$processes.Add([pscustomobject]@{ Kind = $kind; Result = $result; IncludeStdoutText = $false })
+        $captureStep++
+    }
+
+    $profileCaptures = @(
+        [pscustomobject]@{
+            Kind = 'capture-pcm16-auto'
+            Profile = 'pcm16-auto'
+            Progress = '16 бит, автоматический выбор входного формата'
+        },
+        [pscustomobject]@{
+            Kind = 'capture-pcm16-48000-mono'
+            Profile = 'pcm16-48000-mono'
+            Progress = '48 000 Гц, 16 бит, моно'
+        }
+    )
+    foreach ($profileCapture in $profileCaptures) {
+        $args = Get-DShowCaptureArguments -Token ([string]$selection.Moniker) -Profile $profileCapture.Profile
+        & $ProgressSink ("[{0}/8] Короткое открытие служебного имени: {1} (до 17 секунд)..." -f $captureStep, $profileCapture.Progress)
+        $result = & $ProbeInvoker $profileCapture.Kind $FfmpegPath $args $false
+        [void]$processes.Add([pscustomobject]@{ Kind = $profileCapture.Kind; Result = $result; IncludeStdoutText = $false })
         $captureStep++
     }
 
@@ -544,8 +576,11 @@ function Show-CaptureDiagnosticsHelp {
 Диагностика запуска микрофона Conversationaly GigaSTT.
 
 Обычный запуск: дважды щёлкните START_DIAGNOSTICS.cmd и выберите точное имя
-микрофона. Инструмент сделает два коротких открытия DirectShow. Звуковые
-данные отбрасываются в памяти: аудиофайл не создаётся и ничего не отправляется.
+микрофона. Инструмент сделает до четырёх коротких открытий DirectShow: два
+обычных, затем по служебному имени с 16 бит и автоматическим выбором входного
+формата, а также с 48 000 Гц, 16 бит и моно. 16 бит — это разрядность, не
+частота 16 кГц. Звуковые данные отбрасываются в памяти: аудиофайл не создаётся
+и ничего не отправляется.
 
 Автоматизация: collect-dshow.ps1 -SelectedName "точное имя"
 '@ | Write-Output

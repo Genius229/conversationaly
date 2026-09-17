@@ -192,7 +192,35 @@ $collector = Join-Path $PSScriptRoot 'collect-dshow.ps1'
 Invoke-Test 'production argument arrays stay exact' {
     Assert-SequenceEqual @('-hide_banner','-nostats','-nostdin','-list_devices','true','-f','dshow','-i','dummy') @(Get-DShowEnumerationArguments) 'enumeration argv'
     Assert-SequenceEqual @('-hide_banner','-nostats','-nostdin','-loglevel','debug','-list_options','true','-f','dshow','-i','audio=@device_cm_{A}\wave_{B}') @(Get-DShowOptionsArguments -Token '@device_cm_{A}\wave_{B}') 'options argv'
-    Assert-SequenceEqual @('-hide_banner','-nostats','-loglevel','error','-f','dshow','-i','audio=Микрофон "Desk" \ rear','-map','0:a:0','-ac','1','-ar','48000','-c:a','pcm_f32le','-f','f32le','pipe:1') @(Get-DShowCaptureArguments -Token 'Микрофон "Desk" \ rear') 'capture argv'
+    $outputSuffix = @('-map','0:a:0','-ac','1','-ar','48000','-c:a','pcm_f32le','-f','f32le','pipe:1')
+    $baseline = @(Get-DShowCaptureArguments -Token 'Микрофон "Desk" \ rear')
+    $pcm16Auto = @(Get-DShowCaptureArguments -Token 'Микрофон "Desk" \ rear' -Profile 'pcm16-auto')
+    $pcm16Mono48k = @(Get-DShowCaptureArguments -Token 'Микрофон "Desk" \ rear' -Profile 'pcm16-48000-mono')
+
+    Assert-SequenceEqual @('-hide_banner','-nostats','-loglevel','error','-f','dshow','-i','audio=Микрофон "Desk" \ rear','-map','0:a:0','-ac','1','-ar','48000','-c:a','pcm_f32le','-f','f32le','pipe:1') $baseline 'baseline capture argv stays byte-for-byte unchanged'
+    Assert-SequenceEqual @('-hide_banner','-nostats','-loglevel','error','-f','dshow','-sample_size','16','-i','audio=Микрофон "Desk" \ rear','-map','0:a:0','-ac','1','-ar','48000','-c:a','pcm_f32le','-f','f32le','pipe:1') $pcm16Auto 'pcm16 auto capture argv'
+    Assert-SequenceEqual @('-hide_banner','-nostats','-loglevel','error','-f','dshow','-sample_rate','48000','-sample_size','16','-channels','1','-i','audio=Микрофон "Desk" \ rear','-map','0:a:0','-ac','1','-ar','48000','-c:a','pcm_f32le','-f','f32le','pipe:1') $pcm16Mono48k 'pcm16 mono48k capture argv'
+
+    $baselineInput = [Array]::IndexOf($baseline, '-i')
+    $autoInput = [Array]::IndexOf($pcm16Auto, '-i')
+    $monoInput = [Array]::IndexOf($pcm16Mono48k, '-i')
+    Assert-True ([Array]::IndexOf($pcm16Auto, '-sample_size') -lt $autoInput) 'pcm16 auto input option precedes -i'
+    Assert-True ([Array]::IndexOf($pcm16Mono48k, '-sample_rate') -lt $monoInput) 'pcm16 mono48k rate precedes -i'
+    Assert-True ([Array]::IndexOf($pcm16Mono48k, '-sample_size') -lt $monoInput) 'pcm16 mono48k size precedes -i'
+    Assert-True ([Array]::IndexOf($pcm16Mono48k, '-channels') -lt $monoInput) 'pcm16 mono48k channels precede -i'
+    Assert-SequenceEqual $outputSuffix @($baseline[($baselineInput + 2)..($baseline.Count - 1)]) 'baseline output suffix'
+    Assert-SequenceEqual $outputSuffix @($pcm16Auto[($autoInput + 2)..($pcm16Auto.Count - 1)]) 'pcm16 auto output suffix'
+    Assert-SequenceEqual $outputSuffix @($pcm16Mono48k[($monoInput + 2)..($pcm16Mono48k.Count - 1)]) 'pcm16 mono48k output suffix'
+}
+
+Invoke-Test 'unknown capture profile is rejected before a process can launch' {
+    $launches = New-Object Collections.ArrayList
+    Assert-ThrowsLike {
+        $arguments = Get-DShowCaptureArguments -Token '@device_cm_safe' -Profile 'unvalidated-user-args'
+        [void]$launches.Add($arguments)
+        Invoke-OwnedCaptureProcess -FilePath 'must-not-launch.exe' -Arguments $arguments | Out-Null
+    } '*Unknown capture profile*' 'unknown capture profile'
+    Assert-Equal 0 $launches.Count 'process launch remains unreachable'
 }
 
 Invoke-Test 'parser pairs audio friendly and alternative records from the right' {
@@ -240,7 +268,7 @@ Invoke-Test 'install path normalization removes only surrounding quotes' {
     Assert-ThrowsLike { Normalize-InstallLocation -Value '"broken' } '*malformed*' 'one-sided quote'
 }
 
-Invoke-Test 'diagnostic sequence probes both identities after natural moniker failure' {
+Invoke-Test 'diagnostic sequence runs explicit moniker profiles after natural baseline failure' {
     $enumText = "[dshow @ ctx] `"Exact Mic`" (audio)`n[dshow @ ctx] Alternative name `"@device_cm_{ONE}\wave_{TWO}`"`n"
     $enumBytes = [Text.Encoding]::UTF8.GetBytes($enumText)
     $calls = New-Object Collections.ArrayList
@@ -258,11 +286,14 @@ Invoke-Test 'diagnostic sequence probes both identities after natural moniker fa
         if ($Kind -eq 'options-friendly') { $stderr = [Text.Encoding]::UTF8.GetBytes('native friendly options'); $exit = 1 }
         if ($Kind -eq 'capture-moniker') { $stderr = [Text.Encoding]::UTF8.GetBytes('0x80070057'); $exit = 1; $outcome = 'natural_exit_before_data' }
         if ($Kind -eq 'capture-friendly') { $stderr = [Text.Encoding]::UTF8.GetBytes('friendly started'); $exit = 0; $outcome = 'planned_stop_after_data' }
+        if ($Kind -eq 'capture-pcm16-auto') { $stderr = [Text.Encoding]::UTF8.GetBytes('clean exit without audio'); $exit = 0; $outcome = 'natural_exit_before_data' }
+        if ($Kind -eq 'capture-pcm16-48000-mono') { $stderr = [Text.Encoding]::UTF8.GetBytes('explicit format started'); $exit = 0; $outcome = 'planned_stop_after_data' }
+        $hasData = $Kind -in @('capture-friendly','capture-pcm16-48000-mono')
         [pscustomobject]@{
             Started = $true; Arguments = @($Arguments); StartedAtUtc = [DateTime]::UtcNow; FinishedAtUtc = [DateTime]::UtcNow
-            DurationMilliseconds = 1; FirstStdoutByteMilliseconds = $(if ($Kind -eq 'capture-friendly') { 1 } else { $null })
+            DurationMilliseconds = 1; FirstStdoutByteMilliseconds = $(if ($hasData) { 1 } else { $null })
             ExitCode = $exit; ForcedStop = $false; StopRequested = $Kind -like 'capture-*'; TimedOut = $false
-            TotalStdoutBytes = $(if ($Kind -eq 'capture-friendly') { 4096 } else { $stdout.Length }); TotalStderrBytes = $stderr.Length
+            TotalStdoutBytes = $(if ($hasData) { 4096 } else { $stdout.Length }); TotalStderrBytes = $stderr.Length
             RetainedStdout = $stdout; RetainedStderr = $stderr; StdoutTruncated = $false; StderrTruncated = $false
             CleanupComplete = $true; CleanupError = $null; JobAssigned = $true; Outcome = $outcome; LaunchError = $null
         }
@@ -271,13 +302,32 @@ Invoke-Test 'diagnostic sequence probes both identities after natural moniker fa
     $sequence = Invoke-DiagnosticSequence -FfmpegPath 'C:\fake\ffmpeg.exe' -SelectedName 'Exact Mic' -ProbeInvoker $fakeInvoker -ProgressSink $progressSink
     Assert-Equal 'Exact Mic' $sequence.Selection.FriendlyName 'selected friendly name'
     Assert-Equal '@device_cm_{ONE}\wave_{TWO}' $sequence.Selection.Moniker 'selected exact moniker'
-    Assert-Equal 6 $calls.Count 'version enumeration two options two captures'
-    Assert-Equal 'capture-friendly' $calls[5].Kind 'friendly capture still ran after moniker failure'
+    Assert-Equal 8 $calls.Count 'version enumeration two options and four captures'
+    Assert-SequenceEqual @('version','enumeration','options-moniker','options-friendly','capture-moniker','capture-friendly','capture-pcm16-auto','capture-pcm16-48000-mono') @($calls.Kind) 'probe sequence'
+    Assert-Equal 'capture-friendly' $calls[5].Kind 'friendly baseline still ran after moniker failure'
+    Assert-Equal 'capture-pcm16-auto' $calls[6].Kind 'pcm16 auto still ran after moniker failure'
+    Assert-Equal 'capture-pcm16-48000-mono' $calls[7].Kind 'pcm16 mono48k still ran after zero-byte pcm16 auto'
     Assert-SequenceEqual @(Get-DShowCaptureArguments -Token '@device_cm_{ONE}\wave_{TWO}') @($calls[4].Arguments) 'moniker production capture argv'
     Assert-SequenceEqual @(Get-DShowCaptureArguments -Token 'Exact Mic') @($calls[5].Arguments) 'friendly production capture argv'
+    Assert-SequenceEqual @(Get-DShowCaptureArguments -Token '@device_cm_{ONE}\wave_{TWO}' -Profile 'pcm16-auto') @($calls[6].Arguments) 'pcm16 auto production capture argv'
+    Assert-SequenceEqual @(Get-DShowCaptureArguments -Token '@device_cm_{ONE}\wave_{TWO}' -Profile 'pcm16-48000-mono') @($calls[7].Arguments) 'pcm16 mono48k production capture argv'
+    $profileReports = @($sequence.Processes | Where-Object { $_.Kind -like 'capture-pcm16-*' } | ForEach-Object { Convert-ProbeResultForReport -Kind $_.Kind -Result $_.Result })
+    Assert-Equal 2 $profileReports.Count 'two profile results retained independently'
+    Assert-Equal 'capture-pcm16-auto' $profileReports[0].kind 'zero-byte profile kind'
+    Assert-Equal 0 $profileReports[0].totalStdoutBytes 'code-zero profile did not produce audio'
+    Assert-Equal 'natural_exit_before_data' $profileReports[0].outcome 'code-zero profile is not marked successful without audio'
+    Assert-Equal 0 $profileReports[0].stdoutRetainedBytes 'zero-byte profile retains no stdout'
+    Assert-Equal 'capture-pcm16-48000-mono' $profileReports[1].kind 'positive-data profile kind'
+    Assert-Equal 4096 $profileReports[1].totalStdoutBytes 'positive-data profile byte count'
+    Assert-Equal 1 $profileReports[1].firstStdoutByteMilliseconds 'positive-data profile first byte time'
+    Assert-Equal 'planned_stop_after_data' $profileReports[1].outcome 'positive-data profile outcome'
+    Assert-Equal 0 $profileReports[1].stdoutRetainedBytes 'positive-data profile capture stdout is discarded'
     Assert-True (@($progress | Where-Object { $_ -like '*Выбран микрофон*Exact Mic*' }).Count -eq 1) 'selection progress shown in Russian'
+    Assert-True (@($progress | Where-Object { $_ -like '*до четырёх коротких*' }).Count -eq 1) 'progress scopes at most four short captures'
     Assert-True (@($progress | Where-Object { $_ -like '*служебного имени*до * секунд*' }).Count -ge 1) 'bounded moniker capture progress shown'
     Assert-True (@($progress | Where-Object { $_ -like '*видимого имени*до * секунд*' }).Count -ge 1) 'bounded friendly capture progress shown'
+    Assert-True (@($progress | Where-Object { $_ -like '*16 бит*автомат*' }).Count -eq 1) 'pcm16 auto progress shown'
+    Assert-True (@($progress | Where-Object { $_ -like '*48 000 Гц*моно*' }).Count -eq 1) 'pcm16 mono48k progress shown'
 }
 
 Invoke-Test 'diagnostic sequence refuses truncated enumeration before selection' {
@@ -381,7 +431,8 @@ Invoke-Test 'colon in friendly name never reaches FFmpeg selector grammar' {
         }
     }
     $sequence = Invoke-DiagnosticSequence -FfmpegPath 'C:\fake\ffmpeg.exe' -SelectedName $unsafeName -ProbeInvoker $fakeInvoker
-    Assert-Equal 4 $calls.Count 'only version enumeration and two safe moniker probes launch'
+    Assert-Equal 6 $calls.Count 'friendly probes are skipped but all safe moniker probes launch'
+    Assert-SequenceEqual @('version','enumeration','options-moniker','capture-moniker','capture-pcm16-auto','capture-pcm16-48000-mono') @($calls.Kind) 'safe probe kinds for colon friendly name'
     foreach ($call in $calls) {
         Assert-True (-not (@($call.Arguments) -contains ('audio=' + $unsafeName))) 'unsafe friendly selector never launched'
     }
@@ -582,10 +633,13 @@ Invoke-Test 'collector version and help are noninteractive' {
     $hostPath = Get-TestHostPath
     $version = Invoke-OwnedProcess -FilePath $hostPath -Arguments @('-NoLogo','-NoProfile','-NonInteractive','-File',$collector,'-Version') -TimeoutMilliseconds 5000 -RetainStdout
     Assert-Equal 0 $version.ExitCode 'version exit'
-    Assert-Equal '1.0.0' ((Convert-StrictUtf8ForTest $version.RetainedStdout).Trim()) 'tool version'
+    Assert-Equal '1.1.0' ((Convert-StrictUtf8ForTest $version.RetainedStdout).Trim()) 'tool version'
     $help = Invoke-OwnedProcess -FilePath $hostPath -Arguments @('-NoLogo','-NoProfile','-NonInteractive','-File',$collector,'-Help') -TimeoutMilliseconds 5000 -RetainStdout
     Assert-Equal 0 $help.ExitCode 'help exit'
     Assert-True ((Convert-StrictUtf8ForTest $help.RetainedStdout) -like '*микрофон*') 'Russian help'
+    Assert-True ((Convert-StrictUtf8ForTest $help.RetainedStdout) -like '*до четырёх коротких*') 'help scopes at most four short captures'
+    Assert-True ((Convert-StrictUtf8ForTest $help.RetainedStdout) -like '*16 бит*автомат*') 'help explains automatic 16-bit input mode'
+    Assert-True ((Convert-StrictUtf8ForTest $help.RetainedStdout) -like '*48 000 Гц*моно*') 'help explains explicit mono48k input mode'
 }
 
 Invoke-Test 'unknown collector argument fails' {
@@ -598,7 +652,7 @@ $failed = @($script:Results | Where-Object { $_.status -eq 'fail' }).Count
 $skipped = @($script:Results | Where-Object { $_.status -eq 'skip' }).Count
 $summary = [ordered]@{
     schemaVersion = 1
-    toolVersion = '1.0.0'
+    toolVersion = '1.1.0'
     startedAtUtc = $script:StartedAt.ToString('o')
     finishedAtUtc = [DateTime]::UtcNow.ToString('o')
     powershell = $PSVersionTable.PSVersion.ToString()
